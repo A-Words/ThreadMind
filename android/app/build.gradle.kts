@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "app.threadmind"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "app.threadmind"
@@ -24,8 +24,7 @@ android {
 }
 
 dependencies {
-    // API 37 is not yet available in every Android SDK channel; this BOM remains API 36 compatible.
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
