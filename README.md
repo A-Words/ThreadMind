@@ -5,7 +5,7 @@ ThreadMind 是一个面向 Android 用户的个人关系与行动 Agent：它理
 ## 核心闭环
 
 1. 用户在 App 内上传聊天截图，或从其他 Android 应用通过系统分享发送截图，并可附加补充文字。
-2. 云端模型完成 OCR、上下文理解与行动识别。
+2. 云端多模态模型完成视觉转录、上下文理解与行动识别。
 3. 系统生成可编辑的创建会议、创建联系人或更新联系人卡片。
 4. 用户补全缺失字段并逐卡确认后，ThreadMind 才能写入 Android 系统日历或通讯录。
 5. 执行成功后，系统结合本次上下文、联系人数据、日历数据和长期记忆，生成带依据、置信度与事实/推断标签的洞察和建议。
@@ -19,7 +19,7 @@ ThreadMind 是一个面向 Android 用户的个人关系与行动 Agent：它理
 - 支持 App 内上传和 Android 系统分享。
 - 通过 Android Calendar Provider 和 Contacts Provider 访问设备已有账户。
 - 只支持创建会议、创建联系人和更新联系人三类行动。
-- 使用云端多模态模型，但不绑定具体模型供应商、服务端技术栈或 memory backend。
+- 使用可替换的云端多模态模型；MVP 技术栈由 ADR-0001 固定。
 - 不包含 iOS、团队空间、聊天回复生成、通用任务管理、每日回顾或 Google API 直连。
 
 ## 不可破坏的产品约束
@@ -34,5 +34,6 @@ ThreadMind 是一个面向 Android 用户的个人关系与行动 Agent：它理
 
 - [产品需求文档](docs/PRD.md)：产品目标、用户流程、MVP 范围及验收标准。
 - [RFC-0001：上下文、行动、记忆与洞察](docs/rfcs/0001-context-actions-memory-insights.md)：领域边界、最小接口、数据流和隐私约束。
+- [ADR-0001：ThreadMind MVP 技术栈](docs/adrs/0001-technology-stack.md)：Android、服务端、AI 编排、Supabase 与交付方案。
 
-当前仓库先以文档固定产品与领域决策，具体技术选型将在这些边界稳定后另行记录。
+当前仓库以 PRD 固定产品范围、RFC 固定领域语义、ADR 固定实现决策；具体实现尚未开始。
