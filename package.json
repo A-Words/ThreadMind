@@ -1,0 +1,13 @@
+{
+  "name": "threadmind",
+  "private": true,
+  "type": "module",
+  "workspaces": ["server"],
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "npm run build -w @threadmind/server",
+    "dev": "npm run dev -w @threadmind/server",
+    "test": "npm run test -w @threadmind/server",
+    "typecheck": "npm run typecheck -w @threadmind/server"
+  }
+}
