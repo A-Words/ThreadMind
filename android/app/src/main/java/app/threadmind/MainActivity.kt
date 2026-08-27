@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -141,6 +142,7 @@ private fun ThreadMindScreen(viewModel: MainViewModel, onSignOut: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var pendingCardId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { viewModel.checkBackend() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent(), viewModel::importImage)
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         val cardId = pendingCardId
@@ -159,6 +161,10 @@ private fun ThreadMindScreen(viewModel: MainViewModel, onSignOut: () -> Unit) {
         ) {
             item {
                 Text("把聊天变成可确认的行动，以及有依据的下一步建议。", style = MaterialTheme.typography.titleMedium)
+                Text(state.backendMessage, modifier = Modifier.padding(top = 8.dp))
+                if (state.backendStatus == BackendStatus.FAILED) {
+                    TextButton(onClick = viewModel::checkBackend) { Text("重试服务端连接") }
+                }
                 Button(onClick = { picker.launch("image/*") }, modifier = Modifier.padding(top = 12.dp)) {
                     Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null)
                     Text(if (state.selectedImage == null) "选择聊天截图" else "已选择截图")

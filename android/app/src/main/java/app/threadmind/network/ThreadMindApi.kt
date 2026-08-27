@@ -48,8 +48,12 @@ class BearerTokenInterceptor(
 
 object ThreadMindApiFactory {
     fun create(baseUrl: String, tokenProvider: AccessTokenProvider): ThreadMindApi {
-        require(baseUrl.startsWith("https://") || baseUrl.startsWith("http://10.0.2.2")) {
-            "THREADMIND_API_BASE_URL must use HTTPS (or the Android emulator loopback host)"
+        require(
+            baseUrl.startsWith("https://") ||
+                baseUrl.startsWith("http://10.0.2.2") ||
+                baseUrl.startsWith("http://127.0.0.1")
+        ) {
+            "THREADMIND_API_BASE_URL must use HTTPS (or an Android debug loopback host)"
         }
         val json = Json { ignoreUnknownKeys = true }
         val client = OkHttpClient.Builder()
