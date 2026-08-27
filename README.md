@@ -36,4 +36,12 @@ ThreadMind 是一个面向 Android 用户的个人关系与行动 Agent：它理
 - [RFC-0001：上下文、行动、记忆与洞察](docs/rfcs/0001-context-actions-memory-insights.md)：领域边界、最小接口、数据流和隐私约束。
 - [ADR-0001：ThreadMind MVP 技术栈](docs/adrs/0001-technology-stack.md)：Android、服务端、AI 编排、Supabase 与交付方案。
 
-当前仓库以 PRD 固定产品范围、RFC 固定领域语义、ADR 固定实现决策；具体实现尚未开始。
+## 当前实现
+
+仓库已包含第一条可运行 MVP 纵向切片：
+
+- `server/`：Fastify API、Action Card/Memory/Insight 领域规则、Supabase JWT 验证边界、PostgreSQL migration 与 Dockerfile。
+- `android/`：Compose 客户端、系统分享入口、卡片确认状态机，以及只接受确认快照的 Calendar/Contacts Provider executor。
+- 自动化测试覆盖未确认禁止执行、编辑后确认失效、失败回执不生成目标 ID、记忆纠错/删除过滤、洞察证据和账户隔离。
+
+运行方式、已实现范围及尚未接入的生产能力见 [实现说明](docs/IMPLEMENTATION.md)。PRD、RFC 和 ADR 仍是后续实现的约束来源。

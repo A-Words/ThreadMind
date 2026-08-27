@@ -1,0 +1,46 @@
+# ThreadMind 实现说明
+
+当前实现是 MVP 的第一条可运行纵向切片，目标是先把不可破坏的授权、证据、账户隔离与删除语义编码，而不是提前接入未经评测的生产模型。
+
+## 已实现
+
+- `server/`：Node.js 24 + TypeScript + Fastify 模块化服务端。
+- Action Card：字段/evidence 校验、阻塞状态、编辑增版、逐版本确认、不可变确认快照、独立执行回执与账户隔离。
+- Memory：来源强制、事实/推断标记、用户修正版本化、删除与默认召回过滤。
+- Insight：正式洞察必须存在同账户成功回执，并且每个 item 都有依据。
+- Auth：生产入口通过 Supabase JWKS 验证 Bearer Token；不提供生产可用的账户头旁路。
+- PostgreSQL 初始 migration：核心约束、复合外键、部分索引与 RLS 启用。
+- `android/`：Kotlin + Compose + Material 3 + StateFlow + Hilt 工程，支持图片选择、Android 分享入口、卡片确认界面和按动作请求 Provider 权限。
+- Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录。
+- Gradle Wrapper、服务端 Dockerfile、Node 和 Android 领域/API 自动化测试。
+
+## 尚未接入
+
+- Supabase 项目、SMTP、Storage bucket 与 PostgreSQL 运行实例。
+- Kysely 持久化 repository、RLS policy 和 PostgreSQL-backed worker queue。
+- 截图上传、视觉模型 adapter、LangGraph 提取流程及模型评测集。
+- Android 的 OTP 登录、Retrofit API repository、Room/WorkManager 离线恢复、重复联系人/会议冲突审核界面。
+- 真实设备上的联系人/日历写入、权限撤销、账户删除和中国大陆网络验证。
+
+这些边界不应被当前的通过测试误写成已交付能力。
+
+## 本地验证
+
+服务端：
+
+```powershell
+npm install
+npm run typecheck
+npm test
+npm run build
+```
+
+Android：
+
+```powershell
+cd android
+.\gradlew.bat testDebugUnitTest
+.\gradlew.bat assembleDebug
+```
+
+服务端启动前复制 `.env.example` 并配置真实 Supabase Auth 项目。`x-account-id` 只在测试构造的显式不安全模式中启用，普通启动不会接受它。
