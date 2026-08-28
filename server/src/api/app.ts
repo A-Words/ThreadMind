@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { ZodError } from "zod";
-import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../account/auth.js";
-import { InMemoryStore } from "../adapters/in-memory-store.js";
-import { confirmCard, editCard, evaluateCard, recordExecution } from "../domain/action-card.js";
-import { DomainError } from "../domain/errors.js";
-import type { ActionCard } from "../domain/model.js";
-import { createMemory, deleteMemory, reviseMemory } from "../domain/memory.js";
-import { cardInput, executionInput, memoryInput, memoryRevisionInput } from "./schemas.js";
+import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../account/auth.ts";
+import { InMemoryStore } from "../adapters/in-memory-store.ts";
+import { confirmCard, editCard, evaluateCard, recordExecution } from "../domain/action-card.ts";
+import { DomainError } from "../domain/errors.ts";
+import type { ActionCard } from "../domain/model.ts";
+import { createMemory, deleteMemory, reviseMemory } from "../domain/memory.ts";
+import { cardInput, executionInput, memoryInput, memoryRevisionInput } from "./schemas.ts";
 
 export interface AppOptions {
   allowInsecureAccountHeader?: boolean;

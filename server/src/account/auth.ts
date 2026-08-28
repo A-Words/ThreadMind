@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { DomainError } from "../domain/errors.js";
+import { DomainError } from "../domain/errors.ts";
 
 export interface AuthConfig {
   jwksUrl: string;

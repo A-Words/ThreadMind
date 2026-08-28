@@ -1,4 +1,4 @@
-import type { ActionCard, ActionReceipt, InsightBundle, MemoryRecord } from "../domain/model.js";
+import type { ActionCard, ActionReceipt, InsightBundle, MemoryRecord } from "../domain/model.ts";
 
 export class InMemoryStore {
   readonly cards = new Map<string, ActionCard>();

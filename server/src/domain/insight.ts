@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { invariant } from "./errors.js";
-import type { ActionReceipt, InsightBundle, InsightItem } from "./model.js";
+import { invariant } from "./errors.ts";
+import type { ActionReceipt, InsightBundle, InsightItem } from "./model.ts";
 
 export function createInsightBundle(input: {
   accountId: string;

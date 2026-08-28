@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { invariant } from "./errors.js";
-import type { ActionCard, ActionReceipt, ConfirmedActionSnapshot, EvidenceRef } from "./model.js";
+import { invariant } from "./errors.ts";
+import type { ActionCard, ActionReceipt, ConfirmedActionSnapshot, EvidenceRef } from "./model.ts";
 
 const requiredFields = {
   create_meeting: ["title", "startsAt", "endsAt", "timezone", "targetCalendarId"],

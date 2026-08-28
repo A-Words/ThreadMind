@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { invariant } from "./errors.js";
-import type { MemoryRecord } from "./model.js";
+import { invariant } from "./errors.ts";
+import type { MemoryRecord } from "./model.ts";
 
 export function createMemory(input: Omit<MemoryRecord, "id" | "createdAt" | "updatedAt" | "version" | "status">, now = new Date()): MemoryRecord {
   invariant(input.sourceRefs.length > 0, "memory_source_required", "Memory must have a traceable source");

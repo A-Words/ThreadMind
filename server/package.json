@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "node --env-file-if-exists=../.env --watch --experimental-strip-types src/api/main.ts",
+    "dev": "node --env-file-if-exists=../.env --watch --experimental-strip-types --experimental-transform-types src/api/main.ts",
     "start": "node --env-file-if-exists=../.env dist/src/api/main.js",
     "test": "npm run build --silent && node --test dist/test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
