@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -8,9 +10,16 @@ plugins {
 
 fun String.asBuildConfigString(): String = "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
-val supabaseUrl = providers.gradleProperty("THREADMIND_SUPABASE_URL").orElse("")
-val supabasePublishableKey = providers.gradleProperty("THREADMIND_SUPABASE_PUBLISHABLE_KEY").orElse("")
-val apiBaseUrl = providers.gradleProperty("THREADMIND_API_BASE_URL").orElse("")
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use(::load)
+}
+
+fun projectConfig(name: String) =
+    providers.gradleProperty(name).orElse(localProperties.getProperty(name, ""))
+
+val supabaseUrl = projectConfig("THREADMIND_SUPABASE_URL")
+val supabasePublishableKey = projectConfig("THREADMIND_SUPABASE_PUBLISHABLE_KEY")
+val apiBaseUrl = projectConfig("THREADMIND_API_BASE_URL")
 
 android {
     namespace = "app.threadmind"

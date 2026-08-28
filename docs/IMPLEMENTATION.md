@@ -45,7 +45,7 @@ cd android
 .\gradlew.bat assembleDebug
 ```
 
-Android 本地构建可在用户级 `~/.gradle/gradle.properties` 配置以下非版本化值：
+Android 本地构建在已被 Git 忽略的 `android/local.properties` 配置以下项目级值（可与已有的 `sdk.dir` 并存）：
 
 ```properties
 THREADMIND_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
@@ -53,6 +53,8 @@ THREADMIND_SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
 THREADMIND_API_BASE_URL=https://api.example.com
 ```
 
+CI 或临时构建可通过 Gradle `-P` 参数或 `ORG_GRADLE_PROJECT_*` 环境变量覆盖这些值。
+
 只允许在 Android 客户端配置 publishable key，禁止写入 Supabase secret 或 `service_role`。若未配置，应用仍可构建并显示配置提示，但无法发起登录或业务 API 请求。Supabase Hosted 项目还需要把 Magic Link/OTP 邮件模板改为包含 `{{ .Token }}` 的六位验证码模板，并配置自定义 SMTP。
 
-服务端启动前复制 `.env.example` 并配置真实 Supabase Auth 项目。`x-account-id` 只在测试构造的显式不安全模式中启用，普通启动不会接受它。
+服务端启动前复制 `.env.example` 为仓库根目录下的 `.env` 并配置真实 Supabase Auth 项目。`npm run dev` 和 `npm start` 会自动读取该文件；部署环境仍可直接注入环境变量。`x-account-id` 只在测试构造的显式不安全模式中启用，普通启动不会接受它。

@@ -20,7 +20,7 @@ object AuthModule {
     fun provideAuthRepository(): AuthRepository {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_PUBLISHABLE_KEY.isBlank()) {
             return UnavailableAuthRepository(
-                "尚未配置 Supabase。请在 ~/.gradle/gradle.properties 设置 THREADMIND_SUPABASE_URL 和 THREADMIND_SUPABASE_PUBLISHABLE_KEY。",
+                "尚未配置 Supabase。请在 android/local.properties 设置 THREADMIND_SUPABASE_URL 和 THREADMIND_SUPABASE_PUBLISHABLE_KEY。",
             )
         }
         val client = createSupabaseClient(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_PUBLISHABLE_KEY) {
