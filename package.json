@@ -9,6 +9,7 @@
     "dev": "npm run dev -w @threadmind/server",
     "start": "npm run start -w @threadmind/server",
     "test": "npm run test -w @threadmind/server",
+    "test:integration": "npm run test:integration -w @threadmind/server",
     "typecheck": "npm run typecheck -w @threadmind/server"
   }
 }

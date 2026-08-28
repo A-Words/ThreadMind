@@ -33,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +51,7 @@ import app.threadmind.auth.AuthViewModel
 import app.threadmind.domain.ActionCard
 import app.threadmind.domain.ActionStatus
 import app.threadmind.domain.ActionType
+import app.threadmind.network.MemoryRecordResponse
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 
@@ -142,6 +144,7 @@ private fun ThreadMindScreen(viewModel: MainViewModel, onSignOut: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var pendingCardId by remember { mutableStateOf<String?>(null) }
+    var memoryToDelete by remember { mutableStateOf<MemoryRecordResponse?>(null) }
     LaunchedEffect(Unit) { viewModel.checkBackend() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent(), viewModel::importImage)
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -176,6 +179,33 @@ private fun ThreadMindScreen(viewModel: MainViewModel, onSignOut: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
             }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Text("记忆中心", style = MaterialTheme.typography.headlineSmall)
+                    TextButton(
+                        onClick = viewModel::checkBackend,
+                        enabled = state.backendStatus != BackendStatus.CHECKING,
+                    ) { Text("刷新") }
+                }
+                Text("你可以核对、修订或删除系统保存的记忆。修订会保留来源和历史版本。")
+                if (state.backendStatus == BackendStatus.CHECKING) CircularProgressIndicator()
+                if (state.backendStatus == BackendStatus.CONNECTED && state.memories.isEmpty()) {
+                    Text("还没有活动记忆。")
+                }
+                state.memoryMessage?.let { Text(it) }
+            }
+            items(state.memories, key = MemoryRecordResponse::id) { memory ->
+                MemoryCard(
+                    memory = memory,
+                    isPending = memory.id in state.pendingMemoryIds,
+                    onSave = { viewModel.reviseMemory(memory.id, it) },
+                    onDelete = { memoryToDelete = memory },
+                )
+            }
             items(state.cards, key = ActionCard::id) { card ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -199,6 +229,56 @@ private fun ThreadMindScreen(viewModel: MainViewModel, onSignOut: () -> Unit) {
                 }
             }
             state.message?.let { item { Text(it) } }
+        }
+    }
+    memoryToDelete?.let { memory ->
+        AlertDialog(
+            onDismissRequest = { memoryToDelete = null },
+            title = { Text("删除这条记忆？") },
+            text = { Text("删除后，它将不再用于后续洞察和建议。") },
+            confirmButton = {
+                Button(onClick = {
+                    memoryToDelete = null
+                    viewModel.deleteMemory(memory.id)
+                }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { memoryToDelete = null }) { Text("取消") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun MemoryCard(
+    memory: MemoryRecordResponse,
+    isPending: Boolean,
+    onSave: (String) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var assertion by remember(memory.id, memory.assertion) { mutableStateOf(memory.assertion) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                if (memory.epistemicStatus == "fact") "事实" else "推断",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            OutlinedTextField(
+                value = assertion,
+                onValueChange = { assertion = it },
+                enabled = !isPending,
+                label = { Text("记忆内容") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("置信度 ${(memory.confidence * 100).toInt()}% · 第 ${memory.version} 版 · ${memory.sensitivity}")
+            Text("来源：${memory.sourceRefs.joinToString().ifBlank { "无" }}")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onSave(assertion) },
+                    enabled = !isPending && assertion.isNotBlank() && assertion != memory.assertion,
+                ) { Text(if (isPending) "处理中…" else "保存修订") }
+                TextButton(onClick = onDelete, enabled = !isPending) { Text("删除") }
+            }
         }
     }
 }

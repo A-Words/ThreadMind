@@ -2,20 +2,24 @@ import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../account/auth.ts";
+import { InMemoryMemoryRepository } from "../adapters/in-memory-memory-repository.ts";
 import { InMemoryStore } from "../adapters/in-memory-store.ts";
+import type { MemoryRepository } from "../adapters/memory-repository.ts";
 import { confirmCard, editCard, evaluateCard, recordExecution } from "../domain/action-card.ts";
 import { DomainError } from "../domain/errors.ts";
 import type { ActionCard } from "../domain/model.ts";
-import { createMemory, deleteMemory, reviseMemory } from "../domain/memory.ts";
+import { createMemory } from "../domain/memory.ts";
 import { cardInput, executionInput, memoryInput, memoryRevisionInput } from "./schemas.ts";
 
 export interface AppOptions {
   allowInsecureAccountHeader?: boolean;
   auth?: AuthConfig;
+  memoryRepository?: MemoryRepository;
 }
 
 export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) {
   const app = Fastify({ logger: false });
+  const memories = options.memoryRepository ?? new InMemoryMemoryRepository(store);
   const verifyToken = options.allowInsecureAccountHeader
     ? undefined
     : createTokenVerifier(options.auth ?? authConfigFromEnv(process.env));
@@ -85,26 +89,20 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     store.receipts.push(result.receipt);
     return reply.code(201).send(result.receipt);
   });
-  app.get("/v1/memories", async (request) => ({ items: store.activeMemories(request.accountId) }));
+  app.get("/v1/memories", async (request) => ({ items: await memories.listActive(request.accountId) }));
   app.post("/v1/memories", async (request, reply) => {
     const input = memoryInput.parse(request.body);
     const memory = createMemory({ accountId: request.accountId, ...input });
-    store.memories.set(memory.id, memory);
-    return reply.code(201).send(memory);
+    return reply.code(201).send(await memories.create(memory));
   });
   app.patch<{ Params: { id: string } }>("/v1/memories/:id", async (request, reply) => {
-    const current = store.memories.get(request.params.id);
-    if (!current || current.accountId !== request.accountId) return reply.code(404).send({ error: "not_found" });
     const input = memoryRevisionInput.parse(request.body);
-    const [superseded, revised] = reviseMemory(current, input.assertion, input.sourceRef);
-    store.memories.set(superseded.id, superseded);
-    store.memories.set(revised.id, revised);
+    const revised = await memories.revise(request.accountId, request.params.id, input.assertion, input.sourceRef);
+    if (!revised) return reply.code(404).send({ error: "not_found" });
     return reply.send(revised);
   });
   app.delete<{ Params: { id: string } }>("/v1/memories/:id", async (request, reply) => {
-    const current = store.memories.get(request.params.id);
-    if (!current || current.accountId !== request.accountId) return reply.code(404).send({ error: "not_found" });
-    store.memories.set(current.id, deleteMemory(current));
+    if (!await memories.remove(request.accountId, request.params.id)) return reply.code(404).send({ error: "not_found" });
     return reply.code(204).send();
   });
   return app;
