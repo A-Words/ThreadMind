@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { buildApp } from "../src/api/app.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 
 describe("Action Card API", () => {
   it("isolates cards by account and executes only after confirmation", async () => {
@@ -73,3 +74,50 @@ describe("Action Card API", () => {
     await app.close();
   });
 });
+
+describe("Submission API", () => {
+  it("stores one account-scoped submission, enqueues once and hides the storage handle", async () => {
+    const store = new InMemoryStore();
+    const app = buildApp(store, { allowInsecureAccountHeader: true });
+    const submissionId = randomUUID();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const request = multipartPayload({ submissionId, source: "android_share", supplementalText: "客户陈先生" }, png, "image/png");
+    const created = await app.inject({ method: "POST", url: "/v1/submissions", headers: { "x-account-id": "a1", "content-type": request.contentType }, payload: request.body });
+    assert.equal(created.statusCode, 202);
+    assert.equal(created.json().id, submissionId);
+    assert.equal(created.json().status, "uploaded");
+    assert.equal(created.json().imageObjectPath, undefined);
+    assert.equal(created.json().imageSha256, undefined);
+    assert.equal(store.jobs.size, 1);
+
+    const repeated = await app.inject({ method: "POST", url: "/v1/submissions", headers: { "x-account-id": "a1", "content-type": request.contentType }, payload: request.body });
+    assert.deepEqual(repeated.json(), created.json());
+    assert.equal(store.jobs.size, 1);
+
+    const hidden = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a2" } });
+    assert.equal(hidden.statusCode, 404);
+    const visible = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a1" } });
+    assert.deepEqual(visible.json(), created.json());
+
+    const conflictingRequest = multipartPayload({ submissionId, source: "android_share", supplementalText: "客户陈先生" }, Buffer.concat([png, Buffer.from([2])]), "image/png");
+    const conflict = await app.inject({ method: "POST", url: "/v1/submissions", headers: { "x-account-id": "a1", "content-type": conflictingRequest.contentType }, payload: conflictingRequest.body });
+    assert.equal(conflict.statusCode, 409);
+    assert.equal(conflict.json().error, "submission_conflict");
+    await app.close();
+  });
+});
+
+function multipartPayload(
+  fields: Record<string, string>,
+  file: Buffer,
+  contentType: string,
+): { body: Buffer; contentType: string } {
+  const boundary = `threadmind-${randomUUID()}`;
+  const chunks: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+  }
+  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="screenshot.png"\r\nContent-Type: ${contentType}\r\n\r\n`));
+  chunks.push(file, Buffer.from(`\r\n--${boundary}--\r\n`));
+  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+}

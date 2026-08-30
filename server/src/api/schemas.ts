@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+export const submissionFieldsInput = z.object({
+  submissionId: z.uuid(),
+  source: z.enum(["in_app", "android_share"]),
+  supplementalText: z.string().max(4000).optional(),
+});
+
 export const cardInput = z.object({
   cardId: z.uuid(),
   submissionId: z.uuid(),
