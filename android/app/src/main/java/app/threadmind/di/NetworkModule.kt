@@ -1,10 +1,14 @@
 package app.threadmind.di
 
+import android.content.Context
 import app.threadmind.BuildConfig
 import app.threadmind.auth.AuthRepository
 import app.threadmind.network.ThreadMindApi
 import app.threadmind.network.ThreadMindApiFactory
 import app.threadmind.network.UnavailableThreadMindApi
+import app.threadmind.network.AndroidSubmissionWorkflowRepository
+import app.threadmind.network.SubmissionWorkflowRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -24,4 +28,11 @@ object NetworkModule {
         } else {
             ThreadMindApiFactory.create(BuildConfig.API_BASE_URL, authRepository)
         }
+
+    @Provides
+    @Singleton
+    fun provideSubmissionWorkflowRepository(
+        @ApplicationContext context: Context,
+        api: ThreadMindApi,
+    ): SubmissionWorkflowRepository = AndroidSubmissionWorkflowRepository(context, api)
 }

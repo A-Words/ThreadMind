@@ -4,6 +4,12 @@ import app.threadmind.domain.ConfirmedActionSnapshot
 import app.threadmind.network.MemoryListResponse
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.MemoryRevisionRequest
+import app.threadmind.network.ActionCardListResponse
+import app.threadmind.network.ActionCardEditRequest
+import app.threadmind.network.ActionCardResponse
+import app.threadmind.network.ActionReceiptRequest
+import app.threadmind.network.CardVersionRequest
+import app.threadmind.network.SubmissionResponse
 import app.threadmind.network.ThreadMindApi
 import app.threadmind.provider.ProviderExecutor
 import app.threadmind.provider.ProviderResult
@@ -19,6 +25,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModelTest {
@@ -74,6 +82,13 @@ private class FakeThreadMindApi : ThreadMindApi {
     private var memory: MemoryRecordResponse? = memoryRecord()
 
     override suspend fun listMemories() = MemoryListResponse(listOfNotNull(memory))
+
+    override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): SubmissionResponse = error("unused")
+    override suspend fun getSubmission(id: String): SubmissionResponse = error("unused")
+    override suspend fun listActionCards(id: String): ActionCardListResponse = error("unused")
+    override suspend fun confirmActionCard(id: String, request: CardVersionRequest): ActionCardResponse = error("unused")
+    override suspend fun editActionCard(id: String, request: ActionCardEditRequest): ActionCardResponse = error("unused")
+    override suspend fun createActionReceipt(id: String, request: ActionReceiptRequest) = error("unused")
 
     override suspend fun reviseMemory(id: String, request: MemoryRevisionRequest): MemoryRecordResponse {
         check(memory?.id == id)

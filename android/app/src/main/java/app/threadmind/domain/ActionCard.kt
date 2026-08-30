@@ -17,6 +17,8 @@ data class ActionCard(
     val version: Int,
     val fields: Map<String, String>,
     val evidence: List<EvidenceRef>,
+    val fieldConfidence: Map<String, Double>,
+    val validationIssues: List<String>,
     val targetAccountId: String?,
     val status: ActionStatus,
     val blockers: List<String>,
@@ -41,10 +43,10 @@ object ActionCardPolicy {
     )
 
     fun evaluate(card: ActionCard): ActionCard {
-        val blockers = required.getValue(card.type)
+        val blockers = card.validationIssues.map { "validation:$it" }.toMutableList()
+        blockers += required.getValue(card.type)
             .filter { card.fields[it].isNullOrBlank() }
             .map { "missing:$it" }
-            .toMutableList()
         if (card.evidence.isEmpty()) blockers += "missing:evidence"
         if (card.targetAccountId.isNullOrBlank()) blockers += "missing:targetAccountId"
         return card.copy(status = if (blockers.isEmpty()) ActionStatus.READY else ActionStatus.BLOCKED, blockers = blockers)
@@ -66,12 +68,21 @@ object ActionCardPolicy {
         return ready.copy(status = ActionStatus.CONFIRMED, confirmedSnapshot = snapshot)
     }
 
-    fun edit(card: ActionCard, fields: Map<String, String>): ActionCard = evaluate(
-        card.copy(
+    fun edit(
+        card: ActionCard,
+        fields: Map<String, String>,
+        resolvedValidationIssues: Set<String> = emptySet(),
+    ): ActionCard {
+        require(resolvedValidationIssues.all(card.validationIssues::contains)) { "Only current validation issues can be resolved" }
+        return evaluate(card.copy(
             version = card.version + 1,
             fields = fields.toMap(),
+            fieldConfidence = fields.mapValues { (field, value) ->
+                if (card.fields[field] == value) card.fieldConfidence[field] ?: 1.0 else 1.0
+            },
+            validationIssues = card.validationIssues.filterNot(resolvedValidationIssues::contains),
             status = ActionStatus.DRAFT,
             confirmedSnapshot = null,
-        ),
-    )
+        ))
+    }
 }

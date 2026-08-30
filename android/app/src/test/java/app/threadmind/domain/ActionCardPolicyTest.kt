@@ -13,6 +13,8 @@ class ActionCardPolicyTest {
         version = 1,
         fields = mapOf("displayName" to "Chen", "contactMethod" to "chen@example.com", "targetContactAccountId" to "local"),
         evidence = listOf(EvidenceRef("submission-1", "m1", "chen@example.com", 0.99)),
+        fieldConfidence = mapOf("displayName" to 0.8, "contactMethod" to 0.99, "targetContactAccountId" to 1.0),
+        validationIssues = emptyList(),
         targetAccountId = "local",
         status = ActionStatus.DRAFT,
         blockers = emptyList(),
