@@ -12,7 +12,7 @@
 - PostgreSQL：Supabase 托管实例、显式 SQL migration、强制 RLS、最小权限运行角色与 Kysely Memory repository。
 - `android/`：Kotlin + Compose + Material 3 + StateFlow + Hilt 工程，支持图片选择、Android 分享入口、卡片确认界面和按动作请求 Provider 权限。
 - Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录。
-- Android Auth：通过 supabase-kt 区分登录与注册，发送并验证邮箱六位 OTP；注册前强制确认隐私与数据处理说明，会话由 SDK 持久化和刷新。
+- Android Auth：通过 supabase-kt 提供邮箱密码与六位 OTP 两种登录/注册方式；密码注册确认、找回密码和账户内设置密码都在 App 内验证邮件六位码，注册前强制确认隐私与数据处理说明，会话由 SDK 持久化和刷新。
 - Android API client：Retrofit/OkHttp/kotlinx.serialization 客户端从当前 Supabase Session 注入 Bearer Token，不接受账户 ID 头旁路。
 - Android Memory Center：读取活动记忆，展示事实/推断、置信度、版本、敏感级别与来源；支持保留历史的修订和确认后删除。
 - Gradle Wrapper、服务端 Dockerfile、Node 和 Android 领域/API 自动化测试。
@@ -56,7 +56,14 @@ THREADMIND_API_BASE_URL=https://api.example.com
 
 CI 或临时构建可通过 Gradle `-P` 参数或 `ORG_GRADLE_PROJECT_*` 环境变量覆盖这些值。
 
-只允许在 Android 客户端配置 publishable key，禁止写入 Supabase secret 或 `service_role`。若未配置，应用仍可构建并显示配置提示，但无法发起登录或业务 API 请求。Supabase Hosted 项目还需要把 Magic Link/OTP 邮件模板改为包含 `{{ .Token }}` 的六位验证码模板，并配置自定义 SMTP。
+只允许在 Android 客户端配置 publishable key，禁止写入 Supabase secret 或 `service_role`。若未配置，应用仍可构建并显示配置提示，但无法发起登录或业务 API 请求。
+
+Supabase Hosted 项目的 Auth 配置必须满足：
+
+- 启用 Email Provider、Allow new users to sign up 与 Confirm email。
+- Email OTP Length 设为 6；Confirm signup、Magic Link/OTP 和 Reset password 模板都包含 `{{ .Token }}`，使注册确认、passwordless 登录和密码恢复无需浏览器或 Deep Link 即可在 App 内验证。
+- 配置自定义 SMTP，并用中国大陆常见邮箱验证真实送达率；不得将 Supabase 默认邮件服务作为生产通道。
+- Minimum password length 至少为 8。客户端只提前检查八位长度和两次输入一致，字符组合、泄露密码拦截和最终强度判断以 Supabase Auth 为准。
 
 服务端启动前复制 `.env.example` 为仓库根目录下的 `.env`，配置真实 Supabase Auth 项目、`DATABASE_URL` 和 `THREADMIND_E2E_ACCOUNT_ID`。`DATABASE_URL` 使用 `threadmind_runtime` 登录角色，不使用 `postgres`、`service_role` 或 Android publishable key。持久 Fastify 服务优先使用 session pooler（5432）；短生命周期环境可使用 transaction pooler（6543），当前 `pg`/Kysely 查询不启用命名 prepared statements。
 

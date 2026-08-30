@@ -22,7 +22,7 @@ ThreadMind 是 Android 优先的个人关系与行动 Agent。系统需要处理
 | API 与校验 | REST、OpenAPI 3.1、Zod/JSON Schema |
 | AI 编排 | LangChain JS、LangGraph JS |
 | 视觉理解 | 仅使用云端多模态模型；不接入专用 OCR |
-| 身份认证 | Supabase Auth 邮箱六位 OTP、自定义 SMTP |
+| 身份认证 | Supabase Auth 邮箱密码与六位 OTP、自定义 SMTP |
 | 主存储 | Supabase 托管 PostgreSQL、Kysely、显式 SQL migration |
 | 临时图片 | Supabase Storage 私有 Bucket |
 | 后台任务 | 独立 Worker、PostgreSQL-backed queue |
@@ -121,11 +121,14 @@ MVP 不接入 ML Kit、云 OCR API 或其他专用 OCR。使用同一个可替�
 
 ### 6.1 登录方式
 
-- MVP 只使用邮箱六位 OTP，不使用密码、Magic Link、Google 原生登录或其他社交登录。
-- Android 通过 supabase-kt 发起 OTP 并验证验证码。
+- MVP 使用邮箱密码与六位 OTP 两种认证方式；密码是默认登录入口，OTP 始终作为备用方式。
+- Android 通过 supabase-kt 完成密码注册/登录、passwordless OTP、密码恢复与密码更新。密码注册确认、恢复和账户内设置密码均使用邮件六位码在 App 内完成。
+- 不使用 Magic Link、Google 原生登录、其他社交登录、浏览器 OAuth 或认证 Deep Link。
 - 使用自定义 SMTP；不得依赖 Supabase 默认邮件服务作为生产登录通道。
 - SMTP 供应商不在本 ADR 中固定，但必须验证中国大陆常见邮箱的真实送达率。
 - 注册与登录显式区分；只有用户接受隐私与数据处理说明后才允许创建新用户。
+- Supabase Hosted 项目启用邮箱确认并将 OTP 长度设为 6；Confirm signup、Magic Link/OTP 和 Reset password 邮件模板都必须包含 `{{ .Token }}`。
+- 密码最低八位；客户端只校验长度和两次输入一致，最终密码策略由 Supabase Auth 执行。
 
 ### 6.2 Session 与服务端验证
 
