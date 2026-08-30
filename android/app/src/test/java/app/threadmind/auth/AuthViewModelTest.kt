@@ -2,6 +2,7 @@ package app.threadmind.auth
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
@@ -172,6 +173,36 @@ class AuthViewModelTest {
             "person@example.com" to EmailOtpPurpose.PASSWORDLESS_REGISTRATION,
             repository.resends.single(),
         )
+        assertEquals("验证码已重新发送。", viewModel.state.value.codeDeliveryNotice)
+        assertEquals(60, viewModel.state.value.resendSecondsRemaining)
+    }
+
+    @Test fun `code input filters pasted text and resend has independent loading state`() = runTest(dispatcher) {
+        val repository = FakeAuthRepository()
+        val viewModel = AuthViewModel(repository)
+        runCurrent()
+        viewModel.setMethod(AuthMethod.OTP)
+        viewModel.setEmail("person@example.com")
+        viewModel.submitCredentials()
+        runCurrent()
+
+        assertEquals("验证码已发送，请检查邮箱。", viewModel.state.value.codeDeliveryNotice)
+        viewModel.setToken(" 12a34-5678 ")
+        assertEquals("123456", viewModel.state.value.token)
+
+        advanceTimeBy(60_000L)
+        runCurrent()
+        repository.resendGate = CompletableDeferred()
+        viewModel.resendCode()
+        runCurrent()
+        assertTrue(viewModel.state.value.isResendingCode)
+        assertFalse(viewModel.state.value.isLoading)
+
+        repository.resendGate?.complete(Unit)
+        runCurrent()
+        assertFalse(viewModel.state.value.isResendingCode)
+        assertEquals("", viewModel.state.value.token)
+        assertEquals("验证码已重新发送。", viewModel.state.value.codeDeliveryNotice)
     }
 
     @Test fun `password recovery verifies code updates password and reports success`() = runTest(dispatcher) {
@@ -183,7 +214,7 @@ class AuthViewModelTest {
         runCurrent()
 
         assertEquals(listOf("person@example.com"), repository.recoveryRequests)
-        assertEquals("若账号存在，恢复码已发送，请检查邮箱。", viewModel.state.value.feedback?.message)
+        assertEquals("若账号存在，恢复码已发送，请检查邮箱。", viewModel.state.value.codeDeliveryNotice)
         viewModel.setToken("123456")
         viewModel.verifyCode()
         runCurrent()
@@ -254,6 +285,7 @@ private class FakeAuthRepository(initialSession: AuthSession? = null) : AuthRepo
     val updatedPasswords = mutableListOf<String>()
     var signInError: Throwable? = null
     var signUpSession: AuthSession? = null
+    var resendGate: CompletableDeferred<Unit>? = null
     var didSignOut = false
     private var session: AuthSession? = initialSession
 
@@ -281,6 +313,7 @@ private class FakeAuthRepository(initialSession: AuthSession? = null) : AuthRepo
 
     override suspend fun resendEmailOtp(email: String, purpose: EmailOtpPurpose) {
         resends += email to purpose
+        resendGate?.await()
     }
 
     override suspend fun verifyEmailOtp(

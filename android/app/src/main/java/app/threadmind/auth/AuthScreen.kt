@@ -70,6 +70,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.threadmind.ui.theme.ThreadMindSpacing
 import app.threadmind.ui.theme.ThreadMindTheme
 
@@ -115,6 +116,7 @@ object AuthTestTags {
     const val CONFIRM_PASSWORD = "auth_confirm_password"
     const val TOKEN = "auth_token"
     const val PRIMARY_ACTION = "auth_primary_action"
+    const val RESEND_ACTION = "auth_resend_action"
     const val PRIVACY_CONSENT = "auth_privacy_consent"
 }
 
@@ -345,11 +347,16 @@ private fun CredentialsPage(
 private fun CodePage(state: AuthUiState, actions: AuthActions) {
     val focusManager = LocalFocusManager.current
     val tokenFocus = remember { FocusRequester() }
+    val isBusy = state.isLoading || state.isResendingCode
+    val isCodeComplete = state.token.length == 6
+    LaunchedEffect(state.codePurpose) {
+        tokenFocus.requestFocus()
+    }
     LaunchedEffect(state.fieldErrors.token) {
         if (state.fieldErrors.token != null) tokenFocus.requestFocus()
     }
 
-    IconButton(onClick = actions.onCancelFlow, enabled = !state.isLoading) {
+    IconButton(onClick = actions.onCancelFlow, enabled = !isBusy) {
         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
     }
     Column(verticalArrangement = Arrangement.spacedBy(ThreadMindSpacing.small)) {
@@ -360,20 +367,28 @@ private fun CodePage(state: AuthUiState, actions: AuthActions) {
         )
         Text("六位验证码已发送至", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(state.email, style = MaterialTheme.typography.titleMedium)
-        TextButton(onClick = actions.onCancelFlow, enabled = !state.isLoading) {
-            Text("更换邮箱")
+        if (state.codePurpose != AuthCodePurpose.ACCOUNT_PASSWORD_UPDATE) {
+            TextButton(onClick = actions.onCancelFlow, enabled = !isBusy) {
+                Text("更换邮箱")
+            }
         }
     }
 
+    state.codeDeliveryNotice?.let { CodeDeliveryNotice(it) }
     ErrorFeedback(state.feedback)
 
     OutlinedTextField(
         value = state.token,
         onValueChange = actions.onTokenChange,
-        enabled = !state.isLoading,
+        enabled = !isBusy,
         label = { Text("六位验证码") },
         isError = state.fieldErrors.token != null,
-        supportingText = state.fieldErrors.token?.let { error -> { FieldError(error) } },
+        supportingText = {
+            val error = state.fieldErrors.token
+            if (error != null) FieldError(error) else Text("仅输入邮件中的六位数字")
+        },
+        suffix = { Text("${state.token.length}/6") },
+        textStyle = MaterialTheme.typography.titleLarge.copy(letterSpacing = 6.sp),
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
             keyboardType = KeyboardType.NumberPassword,
             imeAction = ImeAction.Done,
@@ -391,21 +406,23 @@ private fun CodePage(state: AuthUiState, actions: AuthActions) {
     PrimaryActionButton(
         label = "验证并继续",
         isLoading = state.isLoading,
+        enabled = isCodeComplete && !state.isResendingCode,
         onClick = actions.onVerifyCode,
     )
 
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
         TextButton(
             onClick = actions.onResendCode,
-            enabled = !state.isLoading && state.resendSecondsRemaining == 0,
+            enabled = !state.isLoading && !state.isResendingCode && state.resendSecondsRemaining == 0,
+            modifier = Modifier.testTag(AuthTestTags.RESEND_ACTION),
         ) {
-            Text(
-                if (state.resendSecondsRemaining > 0) {
-                    "${state.resendSecondsRemaining} 秒后可重新发送"
-                } else {
-                    "重新发送验证码"
-                },
-            )
+            if (state.isResendingCode) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.size(ThreadMindSpacing.small))
+                Text("正在重新发送")
+            } else {
+                Text(resendLabel(state.resendSecondsRemaining))
+            }
         }
     }
 }
@@ -586,10 +603,15 @@ private fun PrivacyConsent(
 }
 
 @Composable
-private fun PrimaryActionButton(label: String, isLoading: Boolean, onClick: () -> Unit) {
+private fun PrimaryActionButton(
+    label: String,
+    isLoading: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     Button(
         onClick = onClick,
-        enabled = !isLoading,
+        enabled = enabled && !isLoading,
         modifier = Modifier.fillMaxWidth().height(48.dp).testTag(AuthTestTags.PRIMARY_ACTION),
     ) {
         if (isLoading) {
@@ -602,6 +624,25 @@ private fun PrimaryActionButton(label: String, isLoading: Boolean, onClick: () -
         }
         Text(label)
     }
+}
+
+@Composable
+private fun CodeDeliveryNotice(message: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Text(message, modifier = Modifier.padding(ThreadMindSpacing.medium))
+    }
+}
+
+private fun resendLabel(secondsRemaining: Int): String {
+    if (secondsRemaining <= 0) return "重新发送验证码"
+    val minutes = secondsRemaining / 60
+    val seconds = secondsRemaining % 60
+    return "%02d:%02d 后可重新发送".format(minutes, seconds)
 }
 
 @Composable

@@ -50,9 +50,11 @@ data class AuthUiState(
     val privacyAccepted: Boolean = false,
     val isInitializing: Boolean = true,
     val isLoading: Boolean = false,
+    val isResendingCode: Boolean = false,
     val session: AuthSession? = null,
     val fieldErrors: AuthFieldErrors = AuthFieldErrors(),
     val feedback: AuthFeedback? = null,
+    val codeDeliveryNotice: String? = null,
     val resendSecondsRemaining: Int = 0,
 )
 
@@ -128,6 +130,7 @@ class AuthViewModel @Inject constructor(
             privacyAccepted = false,
             fieldErrors = AuthFieldErrors(),
             feedback = null,
+            codeDeliveryNotice = null,
             resendSecondsRemaining = 0,
         )
     }
@@ -142,6 +145,7 @@ class AuthViewModel @Inject constructor(
             token = "",
             fieldErrors = AuthFieldErrors(),
             feedback = null,
+            codeDeliveryNotice = null,
             resendSecondsRemaining = 0,
         )
     }
@@ -243,7 +247,8 @@ class AuthViewModel @Inject constructor(
                 confirmPassword = "",
                 token = "",
                 fieldErrors = AuthFieldErrors(),
-                feedback = AuthFeedback("若账号存在，恢复码已发送，请检查邮箱。", AuthFeedbackKind.INFO),
+                feedback = null,
+                codeDeliveryNotice = "若账号存在，恢复码已发送，请检查邮箱。",
                 resendSecondsRemaining = RESEND_DELAY_SECONDS,
             )
         }
@@ -253,18 +258,27 @@ class AuthViewModel @Inject constructor(
     fun resendCode() {
         val snapshot = state.value
         val purpose = snapshot.codePurpose ?: return
-        if (snapshot.isLoading || snapshot.resendSecondsRemaining > 0) return
-        launchRequest {
-            repository.resendEmailOtp(snapshot.email, purpose.toRepositoryPurpose())
-            mutableState.update {
-                it.copy(
-                    token = "",
-                    fieldErrors = it.fieldErrors.copy(token = null),
-                    feedback = AuthFeedback(resendFeedback(purpose), AuthFeedbackKind.INFO),
-                    resendSecondsRemaining = RESEND_DELAY_SECONDS,
-                )
+        if (snapshot.isLoading || snapshot.isResendingCode || snapshot.resendSecondsRemaining > 0) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(isResendingCode = true, feedback = null) }
+            runCatching {
+                repository.resendEmailOtp(snapshot.email, purpose.toRepositoryPurpose())
+            }.onSuccess {
+                mutableState.update {
+                    it.copy(
+                        token = "",
+                        fieldErrors = it.fieldErrors.copy(token = null),
+                        codeDeliveryNotice = resendFeedback(purpose),
+                        resendSecondsRemaining = RESEND_DELAY_SECONDS,
+                    )
+                }
+                startResendCountdown()
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(feedback = AuthFeedback(error.toUserMessage(), AuthFeedbackKind.ERROR))
+                }
             }
-            startResendCountdown()
+            mutableState.update { it.copy(isResendingCode = false) }
         }
     }
 
@@ -293,6 +307,7 @@ class AuthViewModel @Inject constructor(
                         confirmPassword = "",
                         fieldErrors = AuthFieldErrors(),
                         feedback = null,
+                        codeDeliveryNotice = null,
                         resendSecondsRemaining = 0,
                     )
                 }
@@ -319,6 +334,7 @@ class AuthViewModel @Inject constructor(
 
     fun cancelFlow() {
         val snapshot = state.value
+        resendCountdownJob?.cancel()
         if (snapshot.codePurpose == AuthCodePurpose.ACCOUNT_PASSWORD_UPDATE && snapshot.session != null) {
             mutableState.update {
                 it.copy(
@@ -329,6 +345,7 @@ class AuthViewModel @Inject constructor(
                     token = "",
                     fieldErrors = AuthFieldErrors(),
                     feedback = null,
+                    codeDeliveryNotice = null,
                     resendSecondsRemaining = 0,
                 )
             }
@@ -358,6 +375,7 @@ class AuthViewModel @Inject constructor(
                 session = null,
                 fieldErrors = AuthFieldErrors(),
                 feedback = null,
+                codeDeliveryNotice = null,
                 resendSecondsRemaining = 0,
             )
         }
@@ -389,7 +407,8 @@ class AuthViewModel @Inject constructor(
                 confirmPassword = "",
                 token = "",
                 fieldErrors = AuthFieldErrors(),
-                feedback = AuthFeedback(message, AuthFeedbackKind.INFO),
+                feedback = null,
+                codeDeliveryNotice = message,
                 resendSecondsRemaining = RESEND_DELAY_SECONDS,
             )
         }
@@ -407,6 +426,7 @@ class AuthViewModel @Inject constructor(
                 session = session,
                 fieldErrors = AuthFieldErrors(),
                 feedback = feedback,
+                codeDeliveryNotice = null,
                 resendSecondsRemaining = 0,
             )
         }

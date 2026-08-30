@@ -70,14 +70,20 @@ class AuthScreenTest {
                 step = AuthStep.CODE,
                 codePurpose = AuthCodePurpose.PASSWORDLESS_LOGIN,
                 email = "person@example.com",
+                codeDeliveryNotice = "验证码已发送，请检查邮箱。",
                 resendSecondsRemaining = 60,
                 isInitializing = false,
             ),
         )
         compose.setContent { ThreadMindTheme { AuthScreen(state.value, AuthActions.None) } }
 
+        compose.onNodeWithText("验证码已发送，请检查邮箱。").assertIsDisplayed()
+        compose.onNodeWithText("验证并继续").assertIsNotEnabled()
+        compose.onNodeWithText("01:00 后可重新发送").assertIsNotEnabled()
+
+        compose.runOnIdle { state.value = state.value.copy(token = "123456") }
+        compose.onNodeWithText("6/6").assertIsDisplayed()
         compose.onNodeWithText("验证并继续").assertIsEnabled()
-        compose.onNodeWithText("60 秒后可重新发送").assertIsNotEnabled()
 
         compose.runOnIdle {
             state.value = AuthUiState(
@@ -91,6 +97,23 @@ class AuthScreenTest {
         }
         compose.onNodeWithText("验证并继续").assertIsNotEnabled()
         compose.onNodeWithText("重新发送验证码").assertIsNotEnabled()
+    }
+
+    @Test fun resendUsesItsOwnProgressStateAndAccountEmailCannotBeChanged() {
+        setAuthContent(
+            AuthUiState(
+                step = AuthStep.CODE,
+                codePurpose = AuthCodePurpose.ACCOUNT_PASSWORD_UPDATE,
+                email = "person@example.com",
+                token = "123456",
+                isResendingCode = true,
+                isInitializing = false,
+            ),
+        )
+
+        compose.onNodeWithText("正在重新发送").assertIsDisplayed()
+        compose.onNodeWithText("验证并继续").assertIsNotEnabled()
+        compose.onAllNodesWithText("更换邮箱").assertCountEquals(0)
     }
 
     @Test fun newPasswordKeyboardDoneSubmits() {
