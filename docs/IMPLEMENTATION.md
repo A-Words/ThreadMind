@@ -13,6 +13,7 @@
 - Action API：卡片创建使用客户端稳定 UUID，编辑使用期望版本阻止重复应用，确认可安全重试，执行回执使用稳定 UUID 在提交结果不确定时返回原记录。
 - Screenshot Submission API：接收单张 PNG/JPEG/WebP multipart 图片，限制 15 MiB，校验文件签名并计算 SHA-256；相同提交 UUID 和内容可安全重试，API 响应不暴露 Storage 路径或指纹。
 - 临时图片与任务：服务端使用 Supabase secret key 写入私有 `threadmind-submissions` bucket；Submission 元数据和 `analyze_submission` 任务在同一账户事务落库，队列 payload 不保存截图或正文。
+- Worker 处理闭环：后台任务使用带所有者校验的租约领取、续租、指数退避和最大尝试次数；模型输出经结构校验后，Extraction、Action Cards 与 Memory 在账户事务中幂等落库。原图删除成功后 Submission 才进入 `ready`，终态失败也先删图；删图失败会转为独立清理任务。租约被其他 Worker 接管后，旧 Worker 不再落库、删图或结束任务。
 - `android/`：Kotlin + Compose + Material 3 + StateFlow + Hilt 工程，支持图片选择、Android 分享入口、卡片确认界面和按动作请求 Provider 权限。
 - Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录。
 - Android Auth：通过 supabase-kt 提供邮箱密码与六位 OTP 两种登录/注册方式；密码注册确认、找回密码和账户内设置密码都在 App 内验证邮件六位码，注册前强制确认隐私与数据处理说明，会话由 SDK 持久化和刷新。
@@ -22,8 +23,7 @@
 
 ## 尚未接入
 
-- 独立 Worker 的任务领取/重试/原图删除闭环。
-- 视觉模型 adapter、LangGraph 提取流程及模型评测集。
+- 可部署的独立 Worker 进程入口、生产视觉模型 adapter、LangGraph 提取流程及模型评测集。当前只有可替换模型接口、严格输出契约和已自动化验证的单任务处理器，尚不能表述为生产模型链路已接通。
 - Android 的业务 API repository、Room/WorkManager 离线恢复、重复联系人/会议冲突审核界面。
 - 真实设备上的联系人/日历写入、权限撤销、账户删除和中国大陆网络验证。
 
