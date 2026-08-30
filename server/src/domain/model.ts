@@ -91,6 +91,8 @@ export interface ActionCard<TFields extends Record<string, unknown> = Record<str
   version: number;
   fields: TFields;
   evidence: EvidenceRef[];
+  fieldConfidence: Record<string, number>;
+  validationIssues: string[];
   targetAccountId?: string;
   status: ActionStatus;
   blockers: string[];

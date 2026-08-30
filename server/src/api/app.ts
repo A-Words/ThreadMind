@@ -103,6 +103,11 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
       id: input.cardId, accountId: request.accountId, submissionId: input.submissionId,
       type: input.type, version: 1, fields: input.fields,
       evidence: input.evidence.map(({ messageId, ...item }) => messageId ? { ...item, messageId } : item),
+      fieldConfidence: Object.keys(input.fields).reduce<Record<string, number>>((result, field) => {
+        result[field] = input.fieldConfidence[field] ?? 1;
+        return result;
+      }, {}),
+      validationIssues: input.validationIssues,
       ...(input.targetAccountId ? { targetAccountId: input.targetAccountId } : {}), status: "draft", blockers: [],
     });
     return reply.code(201).send(await actions.create(draft));
@@ -123,7 +128,7 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
       if (card.version !== input.expectedVersion) {
         throw new DomainError("card_version_conflict", `Expected version ${input.expectedVersion}, found ${card.version}`);
       }
-      return editCard(card, input.fields);
+      return editCard(card, input.fields, card.evidence, input.resolvedValidationIssues);
     });
     return edited ?? reply.code(404).send({ error: "not_found" });
   });

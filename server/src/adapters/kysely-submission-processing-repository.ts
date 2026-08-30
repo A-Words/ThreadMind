@@ -134,6 +134,8 @@ function toActionCardRow(card: ActionCard): Insertable<ActionCardsTable> {
     version: card.version,
     fields: JSON.stringify(card.fields),
     evidence: JSON.stringify(card.evidence),
+    field_confidence: JSON.stringify(card.fieldConfidence),
+    validation_issues: JSON.stringify(card.validationIssues),
     target_account_id: card.targetAccountId ?? null,
     status: card.status,
     blockers: JSON.stringify(card.blockers),

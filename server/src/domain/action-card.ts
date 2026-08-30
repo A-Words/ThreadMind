@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { invariant } from "./errors.ts";
 import type { ActionCard, ActionReceipt, ConfirmedActionSnapshot, EvidenceRef } from "./model.ts";
 
@@ -14,7 +15,7 @@ export function evaluateCard(card: ActionCard): ActionCard {
     return value === undefined || value === null || value === "";
   });
   const blockers = [
-    ...card.blockers.filter((blocker) => blocker.startsWith("validation:")),
+    ...card.validationIssues.map((issue) => `validation:${issue}`),
     ...missing.map((field) => `missing:${field}`),
   ];
   if (card.evidence.length === 0) blockers.push("missing:evidence");
@@ -26,14 +27,25 @@ export function editCard(
   card: ActionCard,
   fields: Record<string, unknown>,
   evidence: EvidenceRef[] = card.evidence,
+  resolvedValidationIssues: string[] = [],
 ): ActionCard {
   invariant(!["executing", "succeeded", "cancelled"].includes(card.status), "card_not_editable", "Card can no longer be edited");
+  const unknownIssue = resolvedValidationIssues.find((issue) => !card.validationIssues.includes(issue));
+  invariant(!unknownIssue, "unknown_validation_issue", "Only current validation issues can be resolved");
   const { confirmedSnapshot: _snapshot, confirmedAt: _confirmedAt, ...editable } = card;
+  const fieldConfidence = Object.fromEntries(Object.entries(fields).map(([field, value]) => [
+    field,
+    Object.hasOwn(card.fields, field) && isDeepStrictEqual(card.fields[field], value)
+      ? card.fieldConfidence[field] ?? 1
+      : 1,
+  ]));
   return evaluateCard({
     ...editable,
     version: card.version + 1,
     fields: structuredClone(fields),
     evidence: structuredClone(evidence),
+    fieldConfidence,
+    validationIssues: card.validationIssues.filter((issue) => !resolvedValidationIssues.includes(issue)),
     status: "draft",
   });
 }

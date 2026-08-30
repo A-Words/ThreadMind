@@ -104,9 +104,11 @@ export function validateExtractionOutput(
       const evidence = evidenceById.get(evidenceId)!;
       return { sourceId: context.submissionId, messageId: evidence.messageId, excerpt: evidence.excerpt, confidence: evidence.confidence };
     }),
+    fieldConfidence: structuredClone(candidate.fieldConfidence),
+    validationIssues: [...candidate.validationIssues],
     ...(candidate.targetAccountId ? { targetAccountId: candidate.targetAccountId } : {}),
     status: "draft",
-    blockers: candidate.validationIssues.map((issue) => `validation:${issue}`),
+    blockers: [],
   }));
   const memories = output.memoryCandidates.map((candidate, index) => createMemory({
     id: stableUuid(context.submissionId, `memory:${index}:${candidate.id}`),

@@ -11,6 +11,8 @@ export const cardInput = z.object({
   submissionId: z.uuid(),
   type: z.enum(["create_meeting", "create_contact", "update_contact"]),
   fields: z.record(z.string(), z.unknown()),
+  fieldConfidence: z.record(z.string(), z.number().min(0).max(1)).default({}),
+  validationIssues: z.array(z.string().min(1)).default([]),
   evidence: z.array(z.object({
     sourceId: z.string().min(1),
     messageId: z.string().min(1).optional(),
@@ -23,6 +25,7 @@ export const cardInput = z.object({
 export const cardEditInput = z.object({
   expectedVersion: z.number().int().positive(),
   fields: cardInput.shape.fields,
+  resolvedValidationIssues: z.array(z.string().min(1)).default([]),
 });
 
 export const cardVersionInput = z.object({

@@ -74,6 +74,8 @@ describe("PostgreSQL Action Repository", { skip: !enabled }, () => {
         version: 1,
         fields: { displayName: "Integration Contact", contactMethod: "integration@example.com", targetContactAccountId: "integration:test" },
         evidence: [{ sourceId: submissionId, excerpt: "integration@example.com", confidence: 1 }],
+        fieldConfidence: { displayName: 1, contactMethod: 1, targetContactAccountId: 1 },
+        validationIssues: [],
         targetAccountId: "integration:test",
         status: "draft",
         blockers: [],

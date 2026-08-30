@@ -10,6 +10,8 @@ const readyCard = (): ActionCard => evaluateCard({
   id: "card-1", accountId: "account-1", submissionId: "submission-1", type: "create_meeting", version: 1,
   fields: { title: "Coffee", startsAt: "2026-09-01T10:00:00+08:00", endsAt: "2026-09-01T11:00:00+08:00", timezone: "Asia/Taipei", targetCalendarId: "calendar-1" },
   evidence: [{ sourceId: "submission-1", messageId: "m1", excerpt: "下周二十点喝咖啡", confidence: 0.92 }],
+  fieldConfidence: { title: 0.99, startsAt: 0.75, endsAt: 0.75, timezone: 1, targetCalendarId: 1 },
+  validationIssues: [],
   targetAccountId: "calendar-account-1", status: "draft", blockers: [],
 });
 describe("Action Card invariants", () => {
@@ -26,6 +28,21 @@ describe("Action Card invariants", () => {
     const edited = editCard(confirmed, { ...confirmed.fields, title: "Lunch" });
     assert.equal(edited.version, 2);
     assert.equal(edited.confirmedSnapshot, undefined);
+  });
+
+  it("blocks unresolved review issues and only clears explicitly resolved ones", () => {
+    const ambiguous = evaluateCard({ ...readyCard(), validationIssues: ["ambiguous:start", "overlap:event-42"] });
+    assert.equal(ambiguous.status, "blocked");
+    const edited = editCard(
+      ambiguous,
+      { ...ambiguous.fields, startsAt: "2026-09-02T10:00:00+08:00" },
+      ambiguous.evidence,
+      ["ambiguous:start"],
+    );
+    assert.deepEqual(edited.validationIssues, ["overlap:event-42"]);
+    assert.equal(edited.fieldConfidence.startsAt, 1);
+    assert.equal(edited.status, "blocked");
+    assert.throws(() => editCard(edited, edited.fields, edited.evidence, ["missing:issue"]), { code: "unknown_validation_issue" });
   });
 
   it("cannot execute an unconfirmed card and records failures without a target id", () => {

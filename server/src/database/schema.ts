@@ -7,6 +7,7 @@ type Confidence = ColumnType<string, number, number>;
 type JsonStringArray = ColumnType<string[], string, string>;
 type JsonObject = ColumnType<Record<string, unknown>, string, string>;
 type EvidenceJson = ColumnType<ActionCard["evidence"], string, string>;
+type FieldConfidenceJson = ColumnType<ActionCard["fieldConfidence"], string, string>;
 type StringArrayJson = ColumnType<string[], string, string>;
 type ConfirmedSnapshotJson = ColumnType<ActionCard["confirmedSnapshot"] | null, string | null, string | null>;
 
@@ -18,6 +19,8 @@ export interface ActionCardsTable {
   version: number;
   fields: JsonObject;
   evidence: EvidenceJson;
+  field_confidence: FieldConfidenceJson;
+  validation_issues: StringArrayJson;
   target_account_id: string | null;
   status: ActionCard["status"];
   blockers: StringArrayJson;
