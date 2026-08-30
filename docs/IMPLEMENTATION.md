@@ -9,7 +9,8 @@
 - Memory：来源强制、事实/推断标记、用户修正版本化、删除与默认召回过滤。
 - Insight：正式洞察必须存在同账户成功回执，并且每个 item 都有依据。
 - Auth：生产入口通过 Supabase JWKS 验证 Bearer Token；不提供生产可用的账户头旁路。
-- PostgreSQL：Supabase 托管实例、显式 SQL migration、强制 RLS、最小权限运行角色与 Kysely Memory repository。
+- PostgreSQL：Supabase 托管实例、显式 SQL migration、强制 RLS、最小权限运行角色，以及 Kysely Action Card、Action Receipt 与 Memory repositories。
+- Action API：卡片创建使用客户端稳定 UUID，编辑使用期望版本阻止重复应用，确认可安全重试，执行回执使用稳定 UUID 在提交结果不确定时返回原记录。
 - `android/`：Kotlin + Compose + Material 3 + StateFlow + Hilt 工程，支持图片选择、Android 分享入口、卡片确认界面和按动作请求 Provider 权限。
 - Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录。
 - Android Auth：通过 supabase-kt 提供邮箱密码与六位 OTP 两种登录/注册方式；密码注册确认、找回密码和账户内设置密码都在 App 内验证邮件六位码，注册前强制确认隐私与数据处理说明，会话由 SDK 持久化和刷新。
@@ -74,7 +75,7 @@ Supabase Hosted 项目的 Auth 配置必须满足：
 1. `server/migrations/0001_initial.sql` 创建私有 schema、约束、索引、GRANT、强制 RLS 与账户策略。
 2. `server/migrations/0002_create_runtime_role.sql` 创建无 `BYPASSRLS` 的登录角色并授予受限业务角色；密码由部署密钥管理器单独设置，不进入 migration 或 Git。
 
-每个 repository 操作都在短事务内执行 `SET LOCAL ROLE threadmind_api`，再用 JWT `sub` 写入 transaction-local `app.current_account_id`。RLS policy 从该设置读取账户，事务结束后上下文自动清除。创建、修订和删除具有可恢复的幂等语义，以处理连接在提交后断开、客户端无法确认提交结果的情况。详细决策见 [ADR-0002](adrs/0002-postgresql-rls-context.md)。
+每个 repository 操作都在短事务内执行 `SET LOCAL ROLE threadmind_api`，再用 JWT `sub` 写入 transaction-local `app.current_account_id`。RLS policy 从该设置读取账户，事务结束后上下文自动清除。Memory 创建、修订和删除，以及 Action Card 创建、确认和回执写入都具有可恢复语义；非幂等的卡片编辑使用 `expectedVersion` 拒绝重复应用。详细决策见 [ADR-0002](adrs/0002-postgresql-rls-context.md)。
 
 ## 真实 E2E 基线
 

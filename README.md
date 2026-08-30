@@ -40,7 +40,7 @@ ThreadMind 是一个面向 Android 用户的个人关系与行动 Agent：它理
 
 仓库已包含第一条可运行 MVP 纵向切片：
 
-- `server/`：Fastify API、Action Card/Memory/Insight 领域规则、Supabase JWT 验证、Kysely Memory repository、PostgreSQL 强制 RLS migration 与 Dockerfile。
+- `server/`：Fastify API、Action Card/Memory/Insight 领域规则、Supabase JWT 验证、Kysely Action/Receipt/Memory repositories、PostgreSQL 强制 RLS migration 与 Dockerfile。
 - `android/`：Compose 客户端、Supabase 邮箱密码与六位 OTP 登录、App 内密码找回/设置、带 Bearer Token 的 Retrofit 客户端、可查看/修订/删除的 Memory Center、系统分享入口、卡片确认状态机，以及只接受确认快照的 Calendar/Contacts Provider executor。
 - 自动化测试覆盖未确认禁止执行、编辑后确认失效、失败回执不生成目标 ID、记忆纠错/删除过滤、数据库账户隔离、洞察证据和 API 状态；真实 E2E 已覆盖 Android Session → API → Supabase PostgreSQL → RLS → Memory Center。
 
