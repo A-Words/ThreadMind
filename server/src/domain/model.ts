@@ -10,6 +10,42 @@ export type ActionStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+export type SubmissionStatus = "uploaded" | "processing" | "ready" | "failed" | "deleted";
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "dead";
+
+export interface ScreenshotSubmission {
+  id: Id;
+  accountId: Id;
+  imageObjectPath: string;
+  imageContentType: "image/png" | "image/jpeg" | "image/webp";
+  imageByteSize: number;
+  imageSha256: string;
+  supplementalText?: string;
+  source: "in_app" | "android_share";
+  status: SubmissionStatus;
+  failureCode?: string;
+  processingStartedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackgroundJob {
+  id: Id;
+  accountId: Id;
+  type: "analyze_submission" | "delete_submission_artifacts";
+  aggregateId: Id;
+  idempotencyKey: string;
+  status: JobStatus;
+  attempt: number;
+  maxAttempts: number;
+  availableAt: string;
+  lockedAt?: string;
+  lockedBy?: string;
+  lastErrorCode?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface EvidenceRef {
   sourceId: Id;

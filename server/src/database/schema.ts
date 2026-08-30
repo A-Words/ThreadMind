@@ -1,5 +1,5 @@
 import type { ColumnType } from "kysely";
-import type { ActionCard, ActionReceipt, EpistemicStatus, MemoryRecord } from "../domain/model.ts";
+import type { ActionCard, ActionReceipt, BackgroundJob, EpistemicStatus, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | string>;
@@ -42,6 +42,40 @@ export interface ActionReceiptsTable {
   completed_at: Timestamp;
 }
 
+export interface ScreenshotSubmissionsTable {
+  id: string;
+  account_id: string;
+  image_object_path: string;
+  image_content_type: ScreenshotSubmission["imageContentType"];
+  image_byte_size: ColumnType<string, number, number>;
+  image_sha256: string;
+  supplemental_text: string | null;
+  submission_source: ScreenshotSubmission["source"];
+  status: ScreenshotSubmission["status"];
+  failure_code: string | null;
+  processing_started_at: Timestamp | null;
+  completed_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface BackgroundJobsTable {
+  id: string;
+  account_id: string;
+  job_type: BackgroundJob["type"];
+  aggregate_id: string;
+  idempotency_key: string;
+  status: BackgroundJob["status"];
+  attempt: number;
+  max_attempts: number;
+  available_at: Timestamp;
+  locked_at: Timestamp | null;
+  locked_by: string | null;
+  last_error_code: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface MemoryRecordsTable {
   id: string;
   account_id: string;
@@ -62,5 +96,7 @@ export interface MemoryRecordsTable {
 export interface ThreadMindDatabase {
   "threadmind.action_cards": ActionCardsTable;
   "threadmind.action_receipts": ActionReceiptsTable;
+  "threadmind.screenshot_submissions": ScreenshotSubmissionsTable;
+  "threadmind.background_jobs": BackgroundJobsTable;
   "threadmind.memory_records": MemoryRecordsTable;
 }

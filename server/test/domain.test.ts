@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { confirmCard, editCard, evaluateCard, recordExecution } from "../src/domain/action-card.js";
 import { createInsightBundle } from "../src/domain/insight.js";
 import { createMemory, deleteMemory, recallable, reviseMemory } from "../src/domain/memory.js";
+import { prepareSubmission } from "../src/domain/submission.js";
 import type { ActionCard } from "../src/domain/model.js";
 
 const readyCard = (): ActionCard => evaluateCard({
@@ -48,5 +49,18 @@ describe("Memory and insight invariants", () => {
   it("requires successful action receipts and evidence for formal insights", () => {
     const { receipt } = recordExecution(confirmCard(readyCard()), { status: "failed", errorCode: "provider_error" }, []);
     assert.throws(() => createInsightBundle({ accountId: "account-1", submissionId: "submission-1", receipts: [receipt], items: [], modelTrace: { model: "fake", promptVersion: "v1" } }), { code: "successful_action_required" });
+  });
+});
+
+describe("Screenshot submission invariants", () => {
+  it("accepts matching image signatures and rejects spoofed content types", () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const prepared = prepareSubmission({ id: "submission-1", accountId: "account-1", image: png, contentType: "image/png", source: "in_app" });
+    assert.equal(prepared.submission.imageByteSize, png.byteLength);
+    assert.equal(prepared.submission.imageObjectPath, "account-1/submission-1");
+    assert.throws(
+      () => prepareSubmission({ id: "submission-2", accountId: "account-1", image: png, contentType: "image/jpeg", source: "in_app" }),
+      { code: "image_type_mismatch" },
+    );
   });
 });

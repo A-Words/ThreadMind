@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { KyselyActionRepository } from "../src/adapters/kysely-action-repository.js";
 import { KyselyMemoryRepository } from "../src/adapters/kysely-memory-repository.js";
+import { KyselySubmissionRepository } from "../src/adapters/kysely-submission-repository.js";
 import { createDatabase } from "../src/database/database.js";
 import { confirmCard, evaluateCard } from "../src/domain/action-card.js";
 import { createMemory } from "../src/domain/memory.js";
+import { prepareSubmission } from "../src/domain/submission.js";
 
 const accountId = process.env.THREADMIND_E2E_ACCOUNT_ID;
 const enabled = Boolean(process.env.DATABASE_URL && accountId);
@@ -48,10 +50,22 @@ describe("PostgreSQL Action Repository", { skip: !enabled }, () => {
   it("persists account-scoped card transitions and idempotent receipts", async () => {
     const database = createDatabase(process.env);
     const repository = new KyselyActionRepository(database);
+    const submissions = new KyselySubmissionRepository(database);
     const cardId = randomUUID();
     const submissionId = randomUUID();
     const receiptId = randomUUID();
     try {
+      const prepared = prepareSubmission({
+        id: submissionId,
+        accountId: accountId!,
+        image: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]),
+        contentType: "image/png",
+        source: "in_app",
+        supplementalText: "integration:test",
+      });
+      const submission = await submissions.createWithJob(prepared.submission, prepared.job);
+      assert.equal(submission.status, "uploaded");
+      assert.equal(await submissions.find(randomUUID(), submissionId), undefined);
       const created = await repository.create(evaluateCard({
         id: cardId,
         accountId: accountId!,
