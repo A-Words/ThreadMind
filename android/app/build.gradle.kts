@@ -45,6 +45,10 @@ android {
     testOptions { unitTests.isReturnDefaultValues = true }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
@@ -59,6 +63,12 @@ dependencies {
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp("com.google.dagger:hilt-android-compiler:2.60.1")
+    implementation("androidx.room:room-runtime:2.8.4")
+    implementation("androidx.room:room-ktx:2.8.4")
+    ksp("androidx.room:room-compiler:2.8.4")
+    implementation("androidx.work:work-runtime:2.11.2")
+    implementation("androidx.hilt:hilt-work:1.3.0")
+    ksp("androidx.hilt:hilt-compiler:1.3.0")
     implementation(platform("io.github.jan-tennert.supabase:bom:3.7.0"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.ktor:ktor-client-android:3.5.1")
@@ -69,6 +79,8 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("androidx.room:room-testing:2.8.4")
+    testImplementation("androidx.work:work-testing:2.11.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
