@@ -16,6 +16,17 @@ export async function withAccount<T>(
   });
 }
 
+export async function withWorker<T>(
+  database: Kysely<ThreadMindDatabase>,
+  operation: (transaction: AccountTransaction) => Promise<T>,
+): Promise<T> {
+  return database.transaction().execute(async (transaction) => {
+    await sql`set local role threadmind_worker`.execute(transaction);
+    await sql`set local statement_timeout = '30s'`.execute(transaction);
+    return operation(transaction);
+  });
+}
+
 export async function retryTransient<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
