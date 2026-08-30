@@ -13,7 +13,10 @@ export function evaluateCard(card: ActionCard): ActionCard {
     const value = card.fields[field];
     return value === undefined || value === null || value === "";
   });
-  const blockers = [...missing.map((field) => `missing:${field}`)];
+  const blockers = [
+    ...card.blockers.filter((blocker) => blocker.startsWith("validation:")),
+    ...missing.map((field) => `missing:${field}`),
+  ];
   if (card.evidence.length === 0) blockers.push("missing:evidence");
   if (!card.targetAccountId) blockers.push("missing:targetAccountId");
   return { ...card, blockers, status: blockers.length === 0 ? "ready" : "blocked" };

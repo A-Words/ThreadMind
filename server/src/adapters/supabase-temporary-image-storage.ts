@@ -28,6 +28,12 @@ export class SupabaseTemporaryImageStorage implements TemporaryImageStorage {
     const { error } = await this.client.storage.from(this.bucket).remove([path]);
     if (error) throw error;
   }
+
+  async get(path: string): Promise<Uint8Array> {
+    const { data, error } = await this.client.storage.from(this.bucket).download(path);
+    if (error || !data) throw error ?? new Error("storage_object_not_found");
+    return new Uint8Array(await data.arrayBuffer());
+  }
 }
 
 export function createTemporaryImageStorage(env: NodeJS.ProcessEnv): TemporaryImageStorage {
@@ -43,5 +49,6 @@ export function createTemporaryImageStorage(env: NodeJS.ProcessEnv): TemporaryIm
 class UnavailableTemporaryImageStorage implements TemporaryImageStorage {
   constructor(private readonly reason: string) {}
   async putIfAbsent(): Promise<never> { throw new Error(this.reason); }
+  async get(): Promise<never> { throw new Error(this.reason); }
   async remove(): Promise<never> { throw new Error(this.reason); }
 }

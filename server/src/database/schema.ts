@@ -1,5 +1,5 @@
 import type { ColumnType } from "kysely";
-import type { ActionCard, ActionReceipt, BackgroundJob, EpistemicStatus, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
+import type { ActionCard, ActionReceipt, BackgroundJob, ContextExtraction, EpistemicStatus, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | string>;
@@ -76,6 +76,24 @@ export interface BackgroundJobsTable {
   updated_at: Timestamp;
 }
 
+type JsonArray<T> = ColumnType<T[], string, string>;
+type ModelTraceJson = ColumnType<ContextExtraction["modelTrace"], string, string>;
+
+export interface ContextExtractionsTable {
+  id: string;
+  account_id: string;
+  submission_id: string;
+  messages: JsonArray<ContextExtraction["messages"][number]>;
+  participants: JsonArray<ContextExtraction["participants"][number]>;
+  entities: JsonArray<ContextExtraction["entities"][number]>;
+  temporal_expressions: JsonArray<ContextExtraction["temporalExpressions"][number]>;
+  action_candidates: JsonArray<ContextExtraction["actionCandidates"][number]>;
+  evidence_spans: JsonArray<ContextExtraction["evidenceSpans"][number]>;
+  warnings: JsonArray<string>;
+  model_trace: ModelTraceJson;
+  created_at: Timestamp;
+}
+
 export interface MemoryRecordsTable {
   id: string;
   account_id: string;
@@ -98,5 +116,6 @@ export interface ThreadMindDatabase {
   "threadmind.action_receipts": ActionReceiptsTable;
   "threadmind.screenshot_submissions": ScreenshotSubmissionsTable;
   "threadmind.background_jobs": BackgroundJobsTable;
+  "threadmind.context_extractions": ContextExtractionsTable;
   "threadmind.memory_records": MemoryRecordsTable;
 }

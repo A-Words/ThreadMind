@@ -79,6 +79,20 @@ export class KyselyWorkerQueueRepository implements WorkerQueueRepository {
     });
   }
 
+  async renew(jobId: string, workerId: string, now = new Date()): Promise<boolean> {
+    return withWorker(this.database, async (transaction) => {
+      const result = await transaction
+        .updateTable("threadmind.background_jobs")
+        .set({ locked_at: now, updated_at: now })
+        .where("id", "=", jobId)
+        .where("status", "=", "running")
+        .where("locked_by", "=", workerId)
+        .returning("id")
+        .executeTakeFirst();
+      return result !== undefined;
+    });
+  }
+
   async fail(jobId: string, workerId: string, errorCode: string, retryAt: Date, now = new Date()): Promise<boolean> {
     return withWorker(this.database, async (transaction) => {
       const job = await transaction

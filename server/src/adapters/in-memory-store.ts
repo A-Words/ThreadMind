@@ -1,4 +1,4 @@
-import type { ActionCard, ActionReceipt, BackgroundJob, InsightBundle, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
+import type { ActionCard, ActionReceipt, BackgroundJob, ContextExtraction, InsightBundle, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
 
 export class InMemoryStore {
   readonly cards = new Map<string, ActionCard>();
@@ -7,6 +7,7 @@ export class InMemoryStore {
   readonly insights = new Map<string, InsightBundle>();
   readonly submissions = new Map<string, ScreenshotSubmission>();
   readonly jobs = new Map<string, BackgroundJob>();
+  readonly extractions = new Map<string, ContextExtraction>();
 
   card(accountId: string, id: string): ActionCard | undefined {
     const card = this.cards.get(id);

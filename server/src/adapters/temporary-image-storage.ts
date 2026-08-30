@@ -2,6 +2,7 @@ import { DomainError } from "../domain/errors.ts";
 
 export interface TemporaryImageStorage {
   putIfAbsent(path: string, bytes: Uint8Array, contentType: string, sha256: string): Promise<void>;
+  get(path: string): Promise<Uint8Array>;
   remove(path: string): Promise<void>;
 }
 
@@ -19,5 +20,15 @@ export class InMemoryTemporaryImageStorage implements TemporaryImageStorage {
 
   async remove(path: string): Promise<void> {
     this.objects.delete(path);
+  }
+
+  async get(path: string): Promise<Uint8Array> {
+    const object = this.objects.get(path);
+    if (!object) throw new Error("storage_object_not_found");
+    return Uint8Array.from(object.bytes);
+  }
+
+  has(path: string): boolean {
+    return this.objects.has(path);
   }
 }

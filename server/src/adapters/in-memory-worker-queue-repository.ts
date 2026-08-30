@@ -38,6 +38,13 @@ export class InMemoryWorkerQueueRepository implements WorkerQueueRepository {
     return true;
   }
 
+  async renew(jobId: string, workerId: string, now = new Date()): Promise<boolean> {
+    const job = this.store.jobs.get(jobId);
+    if (!job || job.status !== "running" || job.lockedBy !== workerId) return false;
+    this.store.jobs.set(jobId, { ...job, lockedAt: now.toISOString(), updatedAt: now.toISOString() });
+    return true;
+  }
+
   async fail(jobId: string, workerId: string, errorCode: string, retryAt: Date, now = new Date()): Promise<boolean> {
     const job = this.store.jobs.get(jobId);
     if (!job || job.status !== "running" || job.lockedBy !== workerId) return false;

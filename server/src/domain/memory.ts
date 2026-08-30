@@ -2,11 +2,15 @@ import { randomUUID } from "node:crypto";
 import { invariant } from "./errors.ts";
 import type { MemoryRecord } from "./model.ts";
 
-export function createMemory(input: Omit<MemoryRecord, "id" | "createdAt" | "updatedAt" | "version" | "status">, now = new Date()): MemoryRecord {
+export function createMemory(
+  input: Omit<MemoryRecord, "id" | "createdAt" | "updatedAt" | "version" | "status"> & { id?: string },
+  now = new Date(),
+): MemoryRecord {
   invariant(input.sourceRefs.length > 0, "memory_source_required", "Memory must have a traceable source");
   invariant(input.confidence >= 0 && input.confidence <= 1, "invalid_confidence", "Confidence must be between 0 and 1");
   const timestamp = now.toISOString();
-  return { ...structuredClone(input), id: randomUUID(), createdAt: timestamp, updatedAt: timestamp, version: 1, status: "active" };
+  const { id = randomUUID(), ...content } = structuredClone(input);
+  return { ...content, id, createdAt: timestamp, updatedAt: timestamp, version: 1, status: "active" };
 }
 export function reviseMemory(current: MemoryRecord, assertion: string, sourceRef: string, now = new Date()): [MemoryRecord, MemoryRecord] {
   invariant(current.status === "active", "memory_not_active", "Only active memory can be revised");

@@ -47,6 +47,36 @@ export interface BackgroundJob {
   updatedAt: string;
 }
 
+export interface ContextExtraction {
+  id: Id;
+  accountId: Id;
+  submissionId: Id;
+  messages: Array<{
+    id: Id;
+    order: number;
+    text: string;
+    speaker?: string | undefined;
+    confidence: number;
+    region?: { x: number; y: number; width: number; height: number } | undefined;
+  }>;
+  participants: Array<{ id: Id; displayName?: string | undefined; evidenceRefs: Id[]; confidence: number }>;
+  entities: Array<{ id: Id; type: string; value: string; evidenceRefs: Id[]; confidence: number }>;
+  temporalExpressions: Array<{ id: Id; originalText: string; resolvedValue?: string | undefined; timezone?: string | undefined; evidenceRefs: Id[]; confidence: number }>;
+  actionCandidates: Array<{
+    id: Id;
+    type: ActionType;
+    fields: Record<string, unknown>;
+    evidenceRefs: Id[];
+    fieldConfidence: Record<string, number>;
+    validationIssues: string[];
+    targetAccountId?: string | undefined;
+  }>;
+  evidenceSpans: Array<{ id: Id; messageId: Id; excerpt: string; confidence: number }>;
+  warnings: string[];
+  modelTrace: { model: string; promptVersion: string; durationMs?: number | undefined };
+  createdAt: string;
+}
+
 export interface EvidenceRef {
   sourceId: Id;
   messageId?: Id;
