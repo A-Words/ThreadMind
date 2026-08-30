@@ -28,6 +28,7 @@ export function editCard(
   fields: Record<string, unknown>,
   evidence: EvidenceRef[] = card.evidence,
   resolvedValidationIssues: string[] = [],
+  targetAccountId: string | undefined = card.targetAccountId,
 ): ActionCard {
   invariant(!["executing", "succeeded", "cancelled"].includes(card.status), "card_not_editable", "Card can no longer be edited");
   const unknownIssue = resolvedValidationIssues.find((issue) => !card.validationIssues.includes(issue));
@@ -46,6 +47,7 @@ export function editCard(
     evidence: structuredClone(evidence),
     fieldConfidence,
     validationIssues: card.validationIssues.filter((issue) => !resolvedValidationIssues.includes(issue)),
+    ...(targetAccountId ? { targetAccountId } : {}),
     status: "draft",
   });
 }

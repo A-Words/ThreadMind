@@ -47,7 +47,8 @@ describe("Action Card API", () => {
     assert.equal(card.fieldConfidence.displayName, 0.72);
     const editPayload = {
       expectedVersion: 1,
-      fields: { ...card.fields, displayName: "Chen Wei" },
+      fields: { ...card.fields, displayName: "Chen Wei", targetContactAccountId: "work" },
+      targetAccountId: "work",
       resolvedValidationIssues: ["duplicate:contact-42"],
     };
     const edited = await app.inject({ method: "PATCH", url: `/v1/action-cards/${card.id}`, headers: { "x-account-id": "a1" }, payload: editPayload });
@@ -55,6 +56,7 @@ describe("Action Card API", () => {
     assert.equal(edited.json().version, 2);
     assert.equal(edited.json().status, "ready");
     assert.equal(edited.json().fieldConfidence.displayName, 1);
+    assert.equal(edited.json().targetAccountId, "work");
     assert.deepEqual(edited.json().validationIssues, []);
     const repeated = await app.inject({ method: "PATCH", url: `/v1/action-cards/${card.id}`, headers: { "x-account-id": "a1" }, payload: editPayload });
     assert.equal(repeated.statusCode, 409);

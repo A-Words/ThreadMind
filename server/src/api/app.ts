@@ -133,7 +133,7 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
       if (card.version !== input.expectedVersion) {
         throw new DomainError("card_version_conflict", `Expected version ${input.expectedVersion}, found ${card.version}`);
       }
-      return editCard(card, input.fields, card.evidence, input.resolvedValidationIssues);
+      return editCard(card, input.fields, card.evidence, input.resolvedValidationIssues, input.targetAccountId ?? card.targetAccountId);
     });
     return edited ?? reply.code(404).send({ error: "not_found" });
   });

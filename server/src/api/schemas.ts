@@ -25,6 +25,7 @@ export const cardInput = z.object({
 export const cardEditInput = z.object({
   expectedVersion: z.number().int().positive(),
   fields: cardInput.shape.fields,
+  targetAccountId: z.string().min(1).optional(),
   resolvedValidationIssues: z.array(z.string().min(1)).default([]),
 });
 
