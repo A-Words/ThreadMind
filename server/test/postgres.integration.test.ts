@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
+import { KyselyActionRepository } from "../src/adapters/kysely-action-repository.js";
 import { KyselyMemoryRepository } from "../src/adapters/kysely-memory-repository.js";
 import { createDatabase } from "../src/database/database.js";
+import { confirmCard, evaluateCard } from "../src/domain/action-card.js";
 import { createMemory } from "../src/domain/memory.js";
 
 const accountId = process.env.THREADMIND_E2E_ACCOUNT_ID;
@@ -36,6 +38,41 @@ describe("PostgreSQL Memory Repository", { skip: !enabled }, () => {
       assert.equal(await repository.remove(accountId!, revised!.id), true);
       assert.equal(await repository.remove(accountId!, revised!.id), true);
       assert.equal((await repository.listActive(accountId!)).some((item) => item.id === revised!.id), false);
+    } finally {
+      await database.destroy();
+    }
+  });
+});
+
+describe("PostgreSQL Action Repository", { skip: !enabled }, () => {
+  it("persists account-scoped card transitions and idempotent receipts", async () => {
+    const database = createDatabase(process.env);
+    const repository = new KyselyActionRepository(database);
+    const cardId = randomUUID();
+    const submissionId = randomUUID();
+    const receiptId = randomUUID();
+    try {
+      const created = await repository.create(evaluateCard({
+        id: cardId,
+        accountId: accountId!,
+        submissionId,
+        type: "create_contact",
+        version: 1,
+        fields: { displayName: "Integration Contact", contactMethod: "integration@example.com", targetContactAccountId: "integration:test" },
+        evidence: [{ sourceId: submissionId, excerpt: "integration@example.com", confidence: 1 }],
+        targetAccountId: "integration:test",
+        status: "draft",
+        blockers: [],
+      }));
+      assert.equal(created.status, "ready");
+      assert.equal(await repository.find(randomUUID(), cardId), undefined);
+      const confirmed = await repository.mutate(accountId!, cardId, confirmCard);
+      assert.equal(confirmed?.status, "confirmed");
+      const recorded = await repository.recordExecution(accountId!, cardId, receiptId, { status: "succeeded", targetRecordId: "integration:contact" });
+      assert.equal(recorded?.receipt.id, receiptId);
+      assert.equal(recorded?.card.status, "succeeded");
+      const repeated = await repository.recordExecution(accountId!, cardId, receiptId, { status: "succeeded", targetRecordId: "integration:contact" });
+      assert.deepEqual(repeated, recorded);
     } finally {
       await database.destroy();
     }

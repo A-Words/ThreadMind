@@ -1,16 +1,15 @@
-import { sql, type Insertable, type Kysely, type Selectable, type Transaction } from "kysely";
+import { type Insertable, type Kysely, type Selectable } from "kysely";
 import { deleteMemory, reviseMemory } from "../domain/memory.ts";
 import type { MemoryRecord } from "../domain/model.ts";
+import { retryTransient, withAccount } from "../database/account-transaction.ts";
 import type { ThreadMindDatabase, MemoryRecordsTable } from "../database/schema.ts";
 import type { MemoryRepository } from "./memory-repository.ts";
-
-type AccountTransaction = Transaction<ThreadMindDatabase>;
 
 export class KyselyMemoryRepository implements MemoryRepository {
   constructor(private readonly database: Kysely<ThreadMindDatabase>) {}
 
   async listActive(accountId: string): Promise<MemoryRecord[]> {
-    return this.retryTransient(() => this.withAccount(accountId, async (trx) => {
+    return retryTransient(() => withAccount(this.database, accountId, async (trx) => {
       const rows = await trx
         .selectFrom("threadmind.memory_records")
         .selectAll()
@@ -24,7 +23,7 @@ export class KyselyMemoryRepository implements MemoryRepository {
   }
 
   async create(memory: MemoryRecord): Promise<MemoryRecord> {
-    return this.retryTransient(() => this.withAccount(memory.accountId, async (trx) => {
+    return retryTransient(() => withAccount(this.database, memory.accountId, async (trx) => {
       const existing = await trx
         .selectFrom("threadmind.memory_records")
         .selectAll()
@@ -41,7 +40,7 @@ export class KyselyMemoryRepository implements MemoryRepository {
   }
 
   async revise(accountId: string, id: string, assertion: string, sourceRef: string): Promise<MemoryRecord | undefined> {
-    return this.retryTransient(() => this.withAccount(accountId, async (trx) => {
+    return retryTransient(() => withAccount(this.database, accountId, async (trx) => {
       const currentRow = await trx
         .selectFrom("threadmind.memory_records")
         .selectAll()
@@ -80,7 +79,7 @@ export class KyselyMemoryRepository implements MemoryRepository {
   }
 
   async remove(accountId: string, id: string): Promise<boolean> {
-    return this.retryTransient(() => this.withAccount(accountId, async (trx) => {
+    return retryTransient(() => withAccount(this.database, accountId, async (trx) => {
       const currentRow = await trx
         .selectFrom("threadmind.memory_records")
         .selectAll()
@@ -109,30 +108,6 @@ export class KyselyMemoryRepository implements MemoryRepository {
     }));
   }
 
-  private async retryTransient<T>(operation: () => Promise<T>): Promise<T> {
-    try {
-      return await operation();
-    } catch (error) {
-      if (!isTransientDatabaseError(error)) throw error;
-      return operation();
-    }
-  }
-
-  private async withAccount<T>(accountId: string, operation: (trx: AccountTransaction) => Promise<T>): Promise<T> {
-    return this.database.transaction().execute(async (trx) => {
-      await sql`set local role threadmind_api`.execute(trx);
-      await sql`select set_config('app.current_account_id', ${accountId}, true)`.execute(trx);
-      await sql`set local statement_timeout = '5s'`.execute(trx);
-      return operation(trx);
-    });
-  }
-}
-
-function isTransientDatabaseError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const code = "code" in error && typeof error.code === "string" ? error.code : "";
-  return code.startsWith("08") || ["57P01", "57P02", "57P03", "ECONNRESET", "EPIPE", "ETIMEDOUT"].includes(code)
-    || /connection (?:terminated|closed|reset)|socket hang up/i.test(error.message);
 }
 
 function toMemoryRow(memory: MemoryRecord): Insertable<MemoryRecordsTable> {

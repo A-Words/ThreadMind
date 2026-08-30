@@ -1,24 +1,27 @@
-import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../account/auth.ts";
+import type { ActionRepository } from "../adapters/action-repository.ts";
+import { InMemoryActionRepository } from "../adapters/in-memory-action-repository.ts";
 import { InMemoryMemoryRepository } from "../adapters/in-memory-memory-repository.ts";
 import { InMemoryStore } from "../adapters/in-memory-store.ts";
 import type { MemoryRepository } from "../adapters/memory-repository.ts";
-import { confirmCard, editCard, evaluateCard, recordExecution } from "../domain/action-card.ts";
+import { confirmCard, editCard, evaluateCard } from "../domain/action-card.ts";
 import { DomainError } from "../domain/errors.ts";
 import type { ActionCard } from "../domain/model.ts";
 import { createMemory } from "../domain/memory.ts";
-import { cardInput, executionInput, memoryInput, memoryRevisionInput } from "./schemas.ts";
+import { cardEditInput, cardInput, cardVersionInput, executionInput, memoryInput, memoryRevisionInput } from "./schemas.ts";
 
 export interface AppOptions {
   allowInsecureAccountHeader?: boolean;
   auth?: AuthConfig;
+  actionRepository?: ActionRepository;
   memoryRepository?: MemoryRepository;
 }
 
 export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) {
   const app = Fastify({ logger: false });
+  const actions = options.actionRepository ?? new InMemoryActionRepository(store);
   const memories = options.memoryRepository ?? new InMemoryMemoryRepository(store);
   const verifyToken = options.allowInsecureAccountHeader
     ? undefined
@@ -42,51 +45,54 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   app.post("/v1/action-cards", async (request, reply) => {
     const input = cardInput.parse(request.body);
     const draft: ActionCard = evaluateCard({
-      id: randomUUID(), accountId: request.accountId, submissionId: input.submissionId,
+      id: input.cardId, accountId: request.accountId, submissionId: input.submissionId,
       type: input.type, version: 1, fields: input.fields,
       evidence: input.evidence.map(({ messageId, ...item }) => messageId ? { ...item, messageId } : item),
       ...(input.targetAccountId ? { targetAccountId: input.targetAccountId } : {}), status: "draft", blockers: [],
     });
-    store.cards.set(draft.id, draft);
-    return reply.code(201).send(draft);
+    return reply.code(201).send(await actions.create(draft));
   });
   app.post<{ Params: { id: string } }>("/v1/action-cards/:id/confirm", async (request, reply) => {
-    const card = store.card(request.accountId, request.params.id);
-    if (!card) return reply.code(404).send({ error: "not_found" });
-    const confirmed = confirmCard(card);
-    store.cards.set(confirmed.id, confirmed);
-    return confirmed;
+    const input = cardVersionInput.parse(request.body);
+    const confirmed = await actions.mutate(request.accountId, request.params.id, (card) => {
+      if (card.version !== input.expectedVersion) {
+        throw new DomainError("card_version_conflict", `Expected version ${input.expectedVersion}, found ${card.version}`);
+      }
+      return confirmCard(card);
+    });
+    return confirmed ?? reply.code(404).send({ error: "not_found" });
   });
   app.patch<{ Params: { id: string } }>("/v1/action-cards/:id", async (request, reply) => {
-    const card = store.card(request.accountId, request.params.id);
-    if (!card) return reply.code(404).send({ error: "not_found" });
-    const fields = cardInput.shape.fields.parse(request.body);
-    const edited = editCard(card, fields);
-    store.cards.set(edited.id, edited);
-    return edited;
+    const input = cardEditInput.parse(request.body);
+    const edited = await actions.mutate(request.accountId, request.params.id, (card) => {
+      if (card.version !== input.expectedVersion) {
+        throw new DomainError("card_version_conflict", `Expected version ${input.expectedVersion}, found ${card.version}`);
+      }
+      return editCard(card, input.fields);
+    });
+    return edited ?? reply.code(404).send({ error: "not_found" });
   });
   app.delete<{ Params: { id: string } }>("/v1/action-cards/:id", async (request, reply) => {
-    const card = store.card(request.accountId, request.params.id);
-    if (!card) return reply.code(404).send({ error: "not_found" });
-    if (card.status === "executing" || card.status === "succeeded") return reply.code(409).send({ error: "card_not_cancellable" });
-    store.cards.set(card.id, { ...card, status: "cancelled" });
+    const cancelled = await actions.mutate(request.accountId, request.params.id, (card) => {
+      if (card.status === "executing" || card.status === "succeeded") {
+        throw new DomainError("card_not_cancellable", "Card can no longer be cancelled");
+      }
+      return { ...card, status: "cancelled" };
+    });
+    if (!cancelled) return reply.code(404).send({ error: "not_found" });
     return reply.code(204).send();
   });
   app.post<{ Params: { id: string } }>("/v1/action-cards/:id/receipts", async (request, reply) => {
-    const card = store.card(request.accountId, request.params.id);
-    if (!card) return reply.code(404).send({ error: "not_found" });
     const input = executionInput.parse(request.body);
-    const prior = store.receipts.filter((receipt) => receipt.actionCardId === card.id);
     const execution = input.status === "succeeded"
-      ? input
+      ? { status: input.status, targetRecordId: input.targetRecordId } as const
       : {
           status: input.status,
           ...(input.errorCode ? { errorCode: input.errorCode } : {}),
           ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
         };
-    const result = recordExecution(card, execution, prior);
-    store.cards.set(card.id, result.card);
-    store.receipts.push(result.receipt);
+    const result = await actions.recordExecution(request.accountId, request.params.id, input.receiptId, execution);
+    if (!result) return reply.code(404).send({ error: "not_found" });
     return reply.code(201).send(result.receipt);
   });
   app.get("/v1/memories", async (request) => ({ items: await memories.listActive(request.accountId) }));

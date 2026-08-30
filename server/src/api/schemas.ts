@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 export const cardInput = z.object({
-  submissionId: z.string().min(1),
+  cardId: z.uuid(),
+  submissionId: z.uuid(),
   type: z.enum(["create_meeting", "create_contact", "update_contact"]),
   fields: z.record(z.string(), z.unknown()),
   evidence: z.array(z.object({
@@ -13,9 +14,18 @@ export const cardInput = z.object({
   targetAccountId: z.string().min(1).optional(),
 });
 
+export const cardEditInput = z.object({
+  expectedVersion: z.number().int().positive(),
+  fields: cardInput.shape.fields,
+});
+
+export const cardVersionInput = z.object({
+  expectedVersion: z.number().int().positive(),
+});
+
 export const executionInput = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("succeeded"), targetRecordId: z.string().min(1) }),
-  z.object({ status: z.enum(["failed", "cancelled"]), errorCode: z.string().optional(), errorMessage: z.string().optional() }),
+  z.object({ receiptId: z.uuid(), status: z.literal("succeeded"), targetRecordId: z.string().min(1) }),
+  z.object({ receiptId: z.uuid(), status: z.enum(["failed", "cancelled"]), errorCode: z.string().optional(), errorMessage: z.string().optional() }),
 ]);
 
 export const memoryInput = z.object({

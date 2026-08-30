@@ -36,6 +36,7 @@ export function editCard(
 }
 
 export function confirmCard(card: ActionCard, now = new Date()): ActionCard {
+  if (card.status === "confirmed" && card.confirmedSnapshot?.version === card.version) return structuredClone(card);
   const evaluated = evaluateCard(card);
   invariant(evaluated.status === "ready", "card_not_ready", `Card is blocked: ${evaluated.blockers.join(", ")}`);
   const digest = createHash("sha256")
@@ -59,13 +60,14 @@ export function recordExecution(
   result: { status: "succeeded"; targetRecordId: string } | { status: "failed" | "cancelled"; errorCode?: string; errorMessage?: string },
   previousAttempts: ActionReceipt[],
   now = new Date(),
+  receiptId: string = randomUUID(),
 ): { card: ActionCard; receipt: ActionReceipt } {
   invariant(card.status === "confirmed" || card.status === "failed", "card_not_confirmed", "Only a confirmed snapshot can execute");
   invariant(card.confirmedSnapshot, "snapshot_missing", "Confirmed snapshot is required");
   const startedAt = now.toISOString();
   const provider = card.type === "create_meeting" ? "android_calendar" : "android_contacts";
   const receipt: ActionReceipt = {
-    id: randomUUID(),
+    id: receiptId,
     accountId: card.accountId,
     actionCardId: card.id,
     confirmedVersion: card.confirmedSnapshot.version,
