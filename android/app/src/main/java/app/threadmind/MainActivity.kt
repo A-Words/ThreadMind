@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -81,7 +82,7 @@ class MainActivity : ComponentActivity() {
         if (intent.action != Intent.ACTION_SEND || intent.type?.startsWith("image/") != true) return
         val uri = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
-        viewModel.importImage(uri)
+        viewModel.importSharedImage(uri)
     }
 }
 
@@ -149,7 +150,10 @@ private fun ThreadMindScreen(
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         val cardId = pendingCardId
         pendingCardId = null
-        if (cardId != null && grants.values.all { it }) scope.launch { viewModel.execute(cardId) }
+        if (cardId != null) {
+            if (grants.values.all { it }) scope.launch { viewModel.execute(cardId) }
+            else viewModel.permissionDenied(cardId)
+        }
     }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -183,6 +187,23 @@ private fun ThreadMindScreen(
                     label = { Text("补充说明（可选）") },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
+                state.selectedImage?.let {
+                    Text(
+                        "将把所选截图${if (state.supplementalText.isBlank()) "" else "和补充说明"}上传到云端模型分析；原图处理完成后删除。你可以在上传前取消。",
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                        Button(onClick = viewModel::submitForAnalysis, enabled = !state.isSubmissionPending) {
+                            Text(if (state.isSubmissionPending) "处理中…" else "同意上传并分析")
+                        }
+                        TextButton(onClick = viewModel::clearSelectedImage, enabled = !state.isSubmissionPending) { Text("取消") }
+                    }
+                }
+                if (state.isSubmissionPending) CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp))
+                state.submissionMessage?.let { Text(it, modifier = Modifier.padding(top = 8.dp)) }
+                if (state.submissionId != null && !state.isSubmissionPending && state.submissionStatus != "ready") {
+                    TextButton(onClick = viewModel::refreshSubmission) { Text("刷新分析状态") }
+                }
             }
             item {
                 Row(
@@ -212,26 +233,22 @@ private fun ThreadMindScreen(
                 )
             }
             items(state.cards, key = ActionCard::id) { card ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(card.fields["title"] ?: card.fields["displayName"] ?: card.type.name, style = MaterialTheme.typography.titleMedium)
-                        Text("版本 ${card.version} · ${card.status}")
-                        card.evidence.forEach { Text("依据：${it.excerpt} (${(it.confidence * 100).toInt()}%)") }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { viewModel.confirm(card.id) }, enabled = card.status == ActionStatus.READY) { Text("确认当前版本") }
-                            Button(
-                                onClick = {
-                                    pendingCardId = card.id
-                                    permissions.launch(
-                                        if (card.type == ActionType.CREATE_MEETING) arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
-                                        else arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS),
-                                    )
-                                },
-                                enabled = card.status == ActionStatus.CONFIRMED,
-                            ) { Text("授权并写入系统") }
-                        }
-                    }
-                }
+                ActionCardReviewCard(
+                    card = card,
+                    isPending = card.id in state.pendingCardIds,
+                    receiptPending = card.id in state.pendingReceipts,
+                    onSave = { fields, target, issues -> viewModel.editCard(card.id, fields, target, issues) },
+                    onConfirm = { viewModel.confirm(card.id) },
+                    onCancel = { viewModel.cancelCard(card.id) },
+                    onExecute = {
+                        pendingCardId = card.id
+                        permissions.launch(
+                            if (card.type == ActionType.CREATE_MEETING) arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+                            else arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS),
+                        )
+                    },
+                    onRetryReceipt = { viewModel.retryReceipt(card.id) },
+                )
             }
             state.message?.let { item { Text(it) } }
         }
@@ -251,6 +268,87 @@ private fun ThreadMindScreen(
                 TextButton(onClick = { memoryToDelete = null }) { Text("取消") }
             },
         )
+    }
+}
+
+@Composable
+private fun ActionCardReviewCard(
+    card: ActionCard,
+    isPending: Boolean,
+    receiptPending: Boolean,
+    onSave: (Map<String, String>, String, Set<String>) -> Unit,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+    onExecute: () -> Unit,
+    onRetryReceipt: () -> Unit,
+) {
+    var fields by remember(card.id, card.version) { mutableStateOf(card.fields) }
+    var targetAccountId by remember(card.id, card.version) { mutableStateOf(card.targetAccountId.orEmpty()) }
+    var resolvedIssues by remember(card.id, card.version) { mutableStateOf(emptySet<String>()) }
+    val editable = card.status !in setOf(ActionStatus.EXECUTING, ActionStatus.SUCCEEDED, ActionStatus.CANCELLED)
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(fields["title"] ?: fields["displayName"] ?: card.type.name, style = MaterialTheme.typography.titleMedium)
+            Text("版本 ${card.version} · ${card.status}")
+            fields.toSortedMap().forEach { (field, value) ->
+                val confidence = card.fieldConfidence[field]
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { updated -> fields = fields + (field to updated) },
+                    enabled = editable && !isPending,
+                    label = {
+                        Text(
+                            buildString {
+                                append(field)
+                                if (confidence != null) append(" · ${(confidence * 100).toInt()}%${if (confidence < 0.8) " 低置信" else ""}")
+                            },
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            OutlinedTextField(
+                value = targetAccountId,
+                onValueChange = { targetAccountId = it },
+                enabled = editable && !isPending,
+                label = { Text("目标账户（必填且可修改）") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            card.validationIssues.forEach { issue ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = issue in resolvedIssues,
+                        onCheckedChange = { checked ->
+                            resolvedIssues = if (checked) resolvedIssues + issue else resolvedIssues - issue
+                        },
+                        enabled = editable && !isPending,
+                    )
+                    Text("需明确处理：$issue")
+                }
+            }
+            card.blockers.filterNot { it.startsWith("validation:") }.forEach { Text("尚不能确认：$it") }
+            card.evidence.forEach { Text("依据：${it.excerpt} (${(it.confidence * 100).toInt()}%)") }
+            val changed = fields != card.fields || targetAccountId != card.targetAccountId.orEmpty() || resolvedIssues.isNotEmpty()
+            if (editable) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onSave(fields, targetAccountId.trim(), resolvedIssues) },
+                        enabled = !isPending && targetAccountId.isNotBlank() && changed,
+                    ) { Text("保存修改") }
+                    Button(onClick = onConfirm, enabled = !isPending && card.status == ActionStatus.READY && !changed) {
+                        Text("确认当前版本")
+                    }
+                }
+                TextButton(onClick = onCancel, enabled = !isPending) { Text("取消这张卡片") }
+            }
+            Button(onClick = onExecute, enabled = !isPending && card.status == ActionStatus.CONFIRMED) {
+                Text("授权并写入系统")
+            }
+            if (receiptPending) {
+                Text("系统写入结果已知，但云端回执尚未同步；请勿再次执行。")
+                Button(onClick = onRetryReceipt) { Text("重试同步回执") }
+            }
+        }
     }
 }
 

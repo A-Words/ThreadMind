@@ -1,6 +1,12 @@
 package app.threadmind
 
+import android.net.Uri
+import app.threadmind.domain.ActionCard
+import app.threadmind.domain.ActionCardPolicy
+import app.threadmind.domain.ActionStatus
+import app.threadmind.domain.ActionType
 import app.threadmind.domain.ConfirmedActionSnapshot
+import app.threadmind.domain.EvidenceRef
 import app.threadmind.network.MemoryListResponse
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.MemoryRevisionRequest
@@ -10,6 +16,8 @@ import app.threadmind.network.ActionCardResponse
 import app.threadmind.network.ActionReceiptRequest
 import app.threadmind.network.CardVersionRequest
 import app.threadmind.network.SubmissionResponse
+import app.threadmind.network.SubmissionProgress
+import app.threadmind.network.SubmissionWorkflowRepository
 import app.threadmind.network.ThreadMindApi
 import app.threadmind.provider.ProviderExecutor
 import app.threadmind.provider.ProviderResult
@@ -36,7 +44,7 @@ class MainViewModelTest {
     @After fun tearDown() = Dispatchers.resetMain()
 
     @Test fun `backend check exposes authenticated API success`() = runTest(dispatcher) {
-        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi())
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), FakeSubmissionWorkflowRepository())
 
         viewModel.checkBackend()
         runCurrent()
@@ -48,7 +56,7 @@ class MainViewModelTest {
 
     @Test fun `memory correction replaces active item with revised version`() = runTest(dispatcher) {
         val api = FakeThreadMindApi()
-        val viewModel = MainViewModel(FakeProviderExecutor(), api)
+        val viewModel = MainViewModel(FakeProviderExecutor(), api, FakeSubmissionWorkflowRepository())
         viewModel.checkBackend()
         runCurrent()
 
@@ -65,7 +73,7 @@ class MainViewModelTest {
     }
 
     @Test fun `memory deletion removes item from active center`() = runTest(dispatcher) {
-        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi())
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), FakeSubmissionWorkflowRepository())
         viewModel.checkBackend()
         runCurrent()
 
@@ -76,7 +84,49 @@ class MainViewModelTest {
         assertEquals("服务端已连接（0 条记忆）", viewModel.state.value.backendMessage)
         assertEquals("记忆已删除", viewModel.state.value.memoryMessage)
     }
+
+    @Test fun `confirmation comes from server and provider result uploads a receipt`() = runTest(dispatcher) {
+        val submissions = FakeSubmissionWorkflowRepository()
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), submissions)
+        viewModel.showCards(listOf(actionCard()))
+
+        viewModel.confirm("card-1")
+        runCurrent()
+        assertEquals(ActionStatus.CONFIRMED, viewModel.state.value.cards.single().status)
+
+        viewModel.execute("card-1")
+
+        assertEquals(ActionStatus.SUCCEEDED, viewModel.state.value.cards.single().status)
+        assertEquals("succeeded", submissions.receipts.single().status)
+        assertEquals("record-1", submissions.receipts.single().targetRecordId)
+    }
 }
+
+private class FakeSubmissionWorkflowRepository : SubmissionWorkflowRepository {
+    val receipts = mutableListOf<ActionReceiptRequest>()
+
+    override suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String) = error("unused")
+    override suspend fun refresh(submissionId: String): SubmissionProgress = error("unused")
+    override suspend fun edit(cardId: String, expectedVersion: Int, fields: Map<String, String>, targetAccountId: String, resolvedValidationIssues: List<String>) =
+        ActionCardPolicy.edit(actionCard().copy(version = expectedVersion), fields, resolvedValidationIssues.toSet()).copy(targetAccountId = targetAccountId)
+    override suspend fun confirm(cardId: String, expectedVersion: Int) = ActionCardPolicy.confirm(actionCard().copy(version = expectedVersion))
+    override suspend fun cancel(cardId: String) = Unit
+    override suspend fun reportExecution(cardId: String, request: ActionReceiptRequest) { receipts += request }
+}
+
+private fun actionCard() = ActionCard(
+    id = "card-1",
+    submissionId = "submission-1",
+    type = ActionType.CREATE_CONTACT,
+    version = 1,
+    fields = mapOf("displayName" to "Chen", "contactMethod" to "chen@example.com", "targetContactAccountId" to "local"),
+    evidence = listOf(EvidenceRef("submission-1", "m1", "chen@example.com", 0.99)),
+    fieldConfidence = mapOf("displayName" to 0.9, "contactMethod" to 0.99, "targetContactAccountId" to 1.0),
+    validationIssues = emptyList(),
+    targetAccountId = "local",
+    status = ActionStatus.READY,
+    blockers = emptyList(),
+)
 
 private class FakeThreadMindApi : ThreadMindApi {
     private var memory: MemoryRecordResponse? = memoryRecord()
@@ -88,6 +138,7 @@ private class FakeThreadMindApi : ThreadMindApi {
     override suspend fun listActionCards(id: String): ActionCardListResponse = error("unused")
     override suspend fun confirmActionCard(id: String, request: CardVersionRequest): ActionCardResponse = error("unused")
     override suspend fun editActionCard(id: String, request: ActionCardEditRequest): ActionCardResponse = error("unused")
+    override suspend fun cancelActionCard(id: String): Response<Unit> = error("unused")
     override suspend fun createActionReceipt(id: String, request: ActionReceiptRequest) = error("unused")
 
     override suspend fun reviseMemory(id: String, request: MemoryRevisionRequest): MemoryRecordResponse {

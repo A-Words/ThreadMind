@@ -20,8 +20,9 @@ data class SubmissionProgress(
 interface SubmissionWorkflowRepository {
     suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String): SubmissionProgress
     suspend fun refresh(submissionId: String): SubmissionProgress
-    suspend fun edit(cardId: String, expectedVersion: Int, fields: Map<String, String>, resolvedValidationIssues: List<String>): ActionCard
+    suspend fun edit(cardId: String, expectedVersion: Int, fields: Map<String, String>, targetAccountId: String, resolvedValidationIssues: List<String>): ActionCard
     suspend fun confirm(cardId: String, expectedVersion: Int): ActionCard
+    suspend fun cancel(cardId: String)
     suspend fun reportExecution(cardId: String, request: ActionReceiptRequest)
 }
 
@@ -66,11 +67,17 @@ class AndroidSubmissionWorkflowRepository(
         cardId: String,
         expectedVersion: Int,
         fields: Map<String, String>,
+        targetAccountId: String,
         resolvedValidationIssues: List<String>,
     ): ActionCard = api.editActionCard(
         cardId,
-        ActionCardEditRequest(expectedVersion, fields, resolvedValidationIssues),
+        ActionCardEditRequest(expectedVersion, fields, targetAccountId, resolvedValidationIssues),
     ).toDomain()
+
+    override suspend fun cancel(cardId: String) {
+        val response = api.cancelActionCard(cardId)
+        check(response.isSuccessful) { "取消失败（HTTP ${response.code()}）" }
+    }
 
     override suspend fun reportExecution(cardId: String, request: ActionReceiptRequest) {
         api.createActionReceipt(cardId, request)

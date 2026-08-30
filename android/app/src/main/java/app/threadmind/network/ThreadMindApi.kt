@@ -113,6 +113,7 @@ data class ActionCardResponse(
 @Serializable data class ActionCardEditRequest(
     val expectedVersion: Int,
     val fields: Map<String, String>,
+    val targetAccountId: String,
     val resolvedValidationIssues: List<String> = emptyList(),
 )
 @Serializable data class ActionReceiptRequest(
@@ -174,6 +175,9 @@ interface ThreadMindApi {
     @PATCH("v1/action-cards/{id}")
     suspend fun editActionCard(@Path("id") id: String, @Body request: ActionCardEditRequest): ActionCardResponse
 
+    @DELETE("v1/action-cards/{id}")
+    suspend fun cancelActionCard(@Path("id") id: String): RetrofitResponse<Unit>
+
     @POST("v1/action-cards/{id}/receipts")
     suspend fun createActionReceipt(@Path("id") id: String, @Body request: ActionReceiptRequest)
 
@@ -198,6 +202,7 @@ class UnavailableThreadMindApi(
     override suspend fun listActionCards(id: String): Nothing = error(reason)
     override suspend fun confirmActionCard(id: String, request: CardVersionRequest): Nothing = error(reason)
     override suspend fun editActionCard(id: String, request: ActionCardEditRequest): Nothing = error(reason)
+    override suspend fun cancelActionCard(id: String): Nothing = error(reason)
     override suspend fun createActionReceipt(id: String, request: ActionReceiptRequest): Nothing = error(reason)
     override suspend fun listMemories(): Nothing = error(reason)
     override suspend fun reviseMemory(id: String, request: MemoryRevisionRequest): Nothing = error(reason)
@@ -225,7 +230,10 @@ object ThreadMindApiFactory {
         ) {
             "THREADMIND_API_BASE_URL must use HTTPS (or an Android debug loopback host)"
         }
-        val json = Json { ignoreUnknownKeys = true }
+        val json = Json {
+            ignoreUnknownKeys = true
+            explicitNulls = false
+        }
         val client = OkHttpClient.Builder()
             .addInterceptor(BearerTokenInterceptor(tokenProvider))
             .connectTimeout(30, TimeUnit.SECONDS)
