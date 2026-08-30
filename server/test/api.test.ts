@@ -109,6 +109,17 @@ describe("Submission API", () => {
     assert.equal(hidden.statusCode, 404);
     const visible = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a1" } });
     assert.deepEqual(visible.json(), created.json());
+    const action = await app.inject({ method: "POST", url: "/v1/action-cards", headers: { "x-account-id": "a1" }, payload: {
+      cardId: randomUUID(), submissionId, type: "create_contact",
+      fields: { displayName: "Chen", contactMethod: "chen@example.com", targetContactAccountId: "local" },
+      targetAccountId: "local", evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 0.99 }],
+    }});
+    assert.equal(action.statusCode, 201);
+    const cards = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}/action-cards`, headers: { "x-account-id": "a1" } });
+    assert.equal(cards.statusCode, 200);
+    assert.deepEqual(cards.json().items.map((item: { id: string }) => item.id), [action.json().id]);
+    const hiddenCards = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}/action-cards`, headers: { "x-account-id": "a2" } });
+    assert.equal(hiddenCards.statusCode, 404);
 
     const conflictingRequest = multipartPayload({ submissionId, source: "android_share", supplementalText: "客户陈先生" }, Buffer.concat([png, Buffer.from([2])]), "image/png");
     const conflict = await app.inject({ method: "POST", url: "/v1/submissions", headers: { "x-account-id": "a1", "content-type": conflictingRequest.contentType }, payload: conflictingRequest.body });

@@ -7,6 +7,7 @@ export type ExecutionResult =
 export interface ActionRepository {
   create(card: ActionCard): Promise<ActionCard>;
   find(accountId: string, id: string): Promise<ActionCard | undefined>;
+  listForSubmission(accountId: string, submissionId: string): Promise<ActionCard[]>;
   mutate(
     accountId: string,
     id: string,

@@ -17,6 +17,13 @@ export class InMemoryActionRepository implements ActionRepository {
     return this.store.card(accountId, id);
   }
 
+  async listForSubmission(accountId: string, submissionId: string): Promise<ActionCard[]> {
+    return [...this.store.cards.values()]
+      .filter((card) => card.accountId === accountId && card.submissionId === submissionId)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((card) => structuredClone(card));
+  }
+
   async mutate(
     accountId: string,
     id: string,

@@ -36,6 +36,19 @@ export class KyselyActionRepository implements ActionRepository {
     }));
   }
 
+  async listForSubmission(accountId: string, submissionId: string): Promise<ActionCard[]> {
+    return retryTransient(() => withAccount(this.database, accountId, async (transaction) => {
+      const rows = await transaction
+        .selectFrom("threadmind.action_cards")
+        .selectAll()
+        .where("submission_id", "=", submissionId)
+        .orderBy("created_at")
+        .orderBy("id")
+        .execute();
+      return rows.map(toActionCard);
+    }));
+  }
+
   async mutate(accountId: string, id: string, transition: (card: ActionCard) => ActionCard): Promise<ActionCard | undefined> {
     return withAccount(this.database, accountId, async (transaction) => {
       const current = await transaction
