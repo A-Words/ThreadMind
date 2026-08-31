@@ -58,6 +58,15 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) return reply.code(domainErrorStatus(error.code)).send({ error: error.code, message: error.message });
     if (error instanceof ZodError) return reply.code(400).send({ error: "invalid_request", message: error.message });
+    const transportCode = error && typeof error === "object" && "code" in error && typeof error.code === "string"
+      ? error.code
+      : undefined;
+    if (transportCode === "FST_REQ_FILE_TOO_LARGE") {
+      return reply.code(413).send({ error: "image_too_large", message: "Screenshot exceeds 15 MiB" });
+    }
+    if (transportCode && ["FST_FILES_LIMIT", "FST_FIELDS_LIMIT", "FST_PARTS_LIMIT"].includes(transportCode)) {
+      return reply.code(400).send({ error: "invalid_multipart", message: "Multipart request exceeds the allowed parts" });
+    }
     return reply.code(500).send({ error: "internal_error", message: "Request could not be completed" });
   });
   app.addHook("preHandler", async (request, reply) => {

@@ -204,6 +204,22 @@ describe("Action Card API", () => {
 });
 
 describe("Submission API", () => {
+  it("returns a clear client error when the screenshot exceeds 15 MiB", async () => {
+    const app = buildApp(undefined, { allowInsecureAccountHeader: true });
+    const oversized = Buffer.alloc(15 * 1024 * 1024 + 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(oversized);
+    const request = multipartPayload({ submissionId: randomUUID(), source: "in_app" }, oversized, "image/png");
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/submissions",
+      headers: { "x-account-id": "a1", "content-type": request.contentType },
+      payload: request.body,
+    });
+    assert.equal(response.statusCode, 413);
+    assert.equal(response.json().error, "image_too_large");
+    await app.close();
+  });
+
   it("stores one account-scoped submission, enqueues once and hides the storage handle", async () => {
     const store = new InMemoryStore();
     const temporaryImages = new InMemoryTemporaryImageStorage();
