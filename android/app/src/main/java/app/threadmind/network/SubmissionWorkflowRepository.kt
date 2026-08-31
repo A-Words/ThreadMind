@@ -2,24 +2,34 @@ package app.threadmind.network
 
 import android.content.Context
 import android.net.Uri
+import app.threadmind.auth.AuthRepository
+import app.threadmind.data.local.PendingReceiptEntity
+import app.threadmind.data.local.PendingSubmissionEntity
+import app.threadmind.data.local.WorkflowDao
 import app.threadmind.domain.ActionCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import app.threadmind.work.WorkflowSyncEngine
+import app.threadmind.work.WorkflowSyncResult
+import app.threadmind.work.WorkflowWorkScheduler
 
 data class SubmissionProgress(
     val submissionId: String,
     val status: String,
     val cards: List<ActionCard>,
     val failureCode: String? = null,
+    val pendingReceipts: Map<String, ActionReceiptRequest> = emptyMap(),
 )
 
 interface SubmissionWorkflowRepository {
     suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String): SubmissionProgress
     suspend fun refresh(submissionId: String): SubmissionProgress
+    suspend fun restoreLatest(): SubmissionProgress?
     suspend fun edit(cardId: String, expectedVersion: Int, fields: Map<String, String>, targetAccountId: String, resolvedValidationIssues: List<String>): ActionCard
     suspend fun confirm(cardId: String, expectedVersion: Int): ActionCard
     suspend fun cancel(cardId: String)
@@ -29,6 +39,10 @@ interface SubmissionWorkflowRepository {
 class AndroidSubmissionWorkflowRepository(
     private val context: Context,
     private val api: ThreadMindApi,
+    private val auth: AuthRepository,
+    private val dao: WorkflowDao,
+    private val scheduler: WorkflowWorkScheduler,
+    private val syncEngine: WorkflowSyncEngine,
 ) : SubmissionWorkflowRepository {
     override suspend fun submit(
         uri: Uri,
@@ -36,32 +50,49 @@ class AndroidSubmissionWorkflowRepository(
         source: String,
         supplementalText: String,
     ): SubmissionProgress {
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
         val upload = readUpload(uri)
-        val response = api.createSubmission(
-            image = MultipartBody.Part.createFormData(
-                "image",
-                "screenshot.${upload.extension}",
-                upload.bytes.toRequestBody(upload.contentType.toMediaType()),
+        val localFile = persistUpload(submissionId, upload)
+        val now = System.currentTimeMillis()
+        dao.upsertSubmission(
+            PendingSubmissionEntity(
+                accountId = accountId,
+                id = submissionId,
+                localImagePath = localFile.absolutePath,
+                imageContentType = upload.contentType,
+                source = source,
+                supplementalText = supplementalText.trim(),
+                status = "pending_upload",
+                createdAtEpochMillis = now,
+                updatedAtEpochMillis = now,
             ),
-            submissionId = submissionId.textBody(),
-            source = source.textBody(),
-            supplementalText = supplementalText.trim().takeIf(String::isNotEmpty)?.textBody(),
         )
-        return response.toProgress()
+        scheduler.enqueueSubmission(accountId, submissionId)
+        if (syncEngine.syncSubmission(accountId, submissionId) == WorkflowSyncResult.FAILURE) {
+            throw IllegalStateException("提交无法同步，请重新选择截图")
+        }
+        return localProgress(accountId, submissionId)
     }
 
     override suspend fun refresh(submissionId: String): SubmissionProgress {
-        val submission = api.getSubmission(submissionId)
-        val cards = if (submission.status == "ready") {
-            api.listActionCards(submissionId).items.map(ActionCardResponse::toDomain)
-        } else {
-            emptyList()
-        }
-        return submission.toProgress(cards)
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
+        scheduler.enqueueSubmission(accountId, submissionId)
+        syncEngine.syncSubmission(accountId, submissionId)
+        return localProgress(accountId, submissionId)
     }
 
-    override suspend fun confirm(cardId: String, expectedVersion: Int): ActionCard =
-        api.confirmActionCard(cardId, CardVersionRequest(expectedVersion)).toDomain()
+    override suspend fun restoreLatest(): SubmissionProgress? {
+        val accountId = auth.currentUserId() ?: return null
+        val latest = dao.latestSubmission(accountId) ?: return null
+        scheduler.enqueueSubmission(accountId, latest.id)
+        return localProgress(accountId, latest.id)
+    }
+
+    override suspend fun confirm(cardId: String, expectedVersion: Int): ActionCard {
+        val response = api.confirmActionCard(cardId, CardVersionRequest(expectedVersion))
+        cache(response)
+        return response.toDomain()
+    }
 
     override suspend fun edit(
         cardId: String,
@@ -69,18 +100,81 @@ class AndroidSubmissionWorkflowRepository(
         fields: Map<String, String>,
         targetAccountId: String,
         resolvedValidationIssues: List<String>,
-    ): ActionCard = api.editActionCard(
-        cardId,
-        ActionCardEditRequest(expectedVersion, fields, targetAccountId, resolvedValidationIssues),
-    ).toDomain()
+    ): ActionCard {
+        val response = api.editActionCard(cardId, ActionCardEditRequest(expectedVersion, fields, targetAccountId, resolvedValidationIssues))
+        cache(response)
+        return response.toDomain()
+    }
 
     override suspend fun cancel(cardId: String) {
         val response = api.cancelActionCard(cardId)
         check(response.isSuccessful) { "取消失败（HTTP ${response.code()}）" }
+        cacheStatus(cardId, "cancelled")
     }
 
     override suspend fun reportExecution(cardId: String, request: ActionReceiptRequest) {
-        api.createActionReceipt(cardId, request)
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
+        val now = System.currentTimeMillis()
+        val cardPayload = dao.card(accountId, cardId)?.let { cached ->
+            WorkflowSyncEngine.json.decodeFromString<ActionCardResponse>(cached.payloadJson)
+                .copy(status = request.status)
+                .let(WorkflowSyncEngine.json::encodeToString)
+        }
+        dao.recordPendingReceipt(
+            PendingReceiptEntity(
+                accountId = accountId,
+                receiptId = request.receiptId,
+                actionCardId = cardId,
+                payloadJson = WorkflowSyncEngine.json.encodeToString(request),
+                createdAtEpochMillis = now,
+            ),
+            cardStatus = request.status,
+            cardPayloadJson = cardPayload,
+            updatedAt = now,
+        )
+        scheduler.enqueueReceipt(accountId, request.receiptId)
+        when (syncEngine.syncReceipt(accountId, request.receiptId)) {
+            WorkflowSyncResult.SUCCESS -> Unit
+            WorkflowSyncResult.RETRY -> throw IOException("执行回执已保存在设备上，等待网络恢复")
+            WorkflowSyncResult.FAILURE -> throw IllegalStateException("执行回执无法同步")
+        }
+    }
+
+    private suspend fun cache(response: ActionCardResponse) {
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
+        syncEngine.cacheCards(accountId, response.submissionId, listOf(response))
+    }
+
+    private suspend fun cacheStatus(cardId: String, status: String) {
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
+        val cached = dao.card(accountId, cardId) ?: return
+        val payload = WorkflowSyncEngine.json.decodeFromString<ActionCardResponse>(cached.payloadJson)
+            .copy(status = status)
+        dao.updateCardOutcome(
+            accountId = accountId,
+            cardId = cardId,
+            status = status,
+            payloadJson = WorkflowSyncEngine.json.encodeToString(payload),
+            updatedAt = System.currentTimeMillis(),
+        )
+    }
+
+    private suspend fun localProgress(accountId: String, submissionId: String): SubmissionProgress {
+        val submission = requireNotNull(dao.submission(accountId, submissionId)) { "本地提交不存在" }
+        val cards = if (submission.status == "ready") {
+            dao.cards(accountId, submissionId).map { cache ->
+                WorkflowSyncEngine.json.decodeFromString<ActionCardResponse>(cache.payloadJson).toDomain()
+            }
+        } else emptyList()
+        val receipts = dao.pendingReceipts(accountId).associate { pending ->
+            pending.actionCardId to WorkflowSyncEngine.json.decodeFromString<ActionReceiptRequest>(pending.payloadJson)
+        }
+        return SubmissionProgress(submissionId, submission.status, cards, submission.failureCode, receipts)
+    }
+
+    private fun persistUpload(submissionId: String, upload: ImageUpload): File {
+        val directory = File(context.noBackupFilesDir, "pending-submissions").apply { mkdirs() }
+        return File(directory, "$submissionId.${upload.extension}").apply { writeBytes(upload.bytes) }
     }
 
     private suspend fun readUpload(uri: Uri): ImageUpload = withContext(Dispatchers.IO) {
@@ -123,12 +217,3 @@ private fun detectImageContentType(bytes: ByteArray): String? = when {
     bytes.size >= 12 && bytes.copyOfRange(0, 4).decodeToString() == "RIFF" && bytes.copyOfRange(8, 12).decodeToString() == "WEBP" -> "image/webp"
     else -> null
 }
-
-private fun String.textBody() = toRequestBody("text/plain".toMediaType())
-
-private fun SubmissionResponse.toProgress(cards: List<ActionCard> = emptyList()) = SubmissionProgress(
-    submissionId = id,
-    status = status,
-    cards = cards,
-    failureCode = failureCode,
-)

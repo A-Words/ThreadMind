@@ -341,7 +341,7 @@ private fun ActionCardReviewCard(
                 }
                 TextButton(onClick = onCancel, enabled = !isPending) { Text("取消这张卡片") }
             }
-            Button(onClick = onExecute, enabled = !isPending && card.status == ActionStatus.CONFIRMED) {
+            Button(onClick = onExecute, enabled = !isPending && !receiptPending && card.status == ActionStatus.CONFIRMED) {
                 Text("授权并写入系统")
             }
             if (receiptPending) {

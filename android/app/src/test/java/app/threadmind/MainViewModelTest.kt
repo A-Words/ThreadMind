@@ -100,13 +100,56 @@ class MainViewModelTest {
         assertEquals("succeeded", submissions.receipts.single().status)
         assertEquals("record-1", submissions.receipts.single().targetRecordId)
     }
+
+    @Test fun `backend check restores latest review and pending receipt`() = runTest(dispatcher) {
+        val pendingReceipt = ActionReceiptRequest("receipt-1", "succeeded", targetRecordId = "record-1")
+        val restoredCard = ActionCardPolicy.confirm(actionCard())
+        val submissions = FakeSubmissionWorkflowRepository(
+            restored = SubmissionProgress(
+                submissionId = "submission-1",
+                status = "ready",
+                cards = listOf(restoredCard),
+                pendingReceipts = mapOf("card-1" to pendingReceipt),
+            ),
+        )
+        val provider = FakeProviderExecutor()
+        val viewModel = MainViewModel(provider, FakeThreadMindApi(), submissions)
+
+        viewModel.checkBackend()
+        runCurrent()
+
+        assertEquals("submission-1", viewModel.state.value.submissionId)
+        assertEquals(ActionStatus.CONFIRMED, viewModel.state.value.cards.single().status)
+        assertEquals(pendingReceipt, viewModel.state.value.pendingReceipts["card-1"])
+        assertEquals("分析完成：1 张待审核卡片，云端原图已删除", viewModel.state.value.submissionMessage)
+
+        viewModel.execute("card-1")
+
+        assertEquals(0, provider.executionCount)
+        assertEquals("执行回执尚未同步，请勿再次写入系统", viewModel.state.value.message)
+    }
+
+    @Test fun `backend check clears a previous account review when none is stored`() = runTest(dispatcher) {
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), FakeSubmissionWorkflowRepository())
+        viewModel.showCards(listOf(actionCard()))
+
+        viewModel.checkBackend()
+        runCurrent()
+
+        assertEquals(emptyList<ActionCard>(), viewModel.state.value.cards)
+        assertEquals(null, viewModel.state.value.submissionId)
+        assertEquals(emptyMap<String, ActionReceiptRequest>(), viewModel.state.value.pendingReceipts)
+    }
 }
 
-private class FakeSubmissionWorkflowRepository : SubmissionWorkflowRepository {
+private class FakeSubmissionWorkflowRepository(
+    private val restored: SubmissionProgress? = null,
+) : SubmissionWorkflowRepository {
     val receipts = mutableListOf<ActionReceiptRequest>()
 
     override suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String) = error("unused")
     override suspend fun refresh(submissionId: String): SubmissionProgress = error("unused")
+    override suspend fun restoreLatest(): SubmissionProgress? = restored
     override suspend fun edit(cardId: String, expectedVersion: Int, fields: Map<String, String>, targetAccountId: String, resolvedValidationIssues: List<String>) =
         ActionCardPolicy.edit(actionCard().copy(version = expectedVersion), fields, resolvedValidationIssues.toSet()).copy(targetAccountId = targetAccountId)
     override suspend fun confirm(cardId: String, expectedVersion: Int) = ActionCardPolicy.confirm(actionCard().copy(version = expectedVersion))
@@ -180,5 +223,10 @@ private fun memoryRecord(
 )
 
 private class FakeProviderExecutor : ProviderExecutor {
-    override suspend fun execute(snapshot: ConfirmedActionSnapshot) = ProviderResult.Succeeded("record-1")
+    var executionCount = 0
+
+    override suspend fun execute(snapshot: ConfirmedActionSnapshot): ProviderResult {
+        executionCount += 1
+        return ProviderResult.Succeeded("record-1")
+    }
 }

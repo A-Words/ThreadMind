@@ -8,6 +8,9 @@ import app.threadmind.network.ThreadMindApiFactory
 import app.threadmind.network.UnavailableThreadMindApi
 import app.threadmind.network.AndroidSubmissionWorkflowRepository
 import app.threadmind.network.SubmissionWorkflowRepository
+import app.threadmind.data.local.WorkflowDao
+import app.threadmind.work.WorkflowSyncEngine
+import app.threadmind.work.WorkflowWorkScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.Module
 import dagger.Provides
@@ -34,5 +37,9 @@ object NetworkModule {
     fun provideSubmissionWorkflowRepository(
         @ApplicationContext context: Context,
         api: ThreadMindApi,
-    ): SubmissionWorkflowRepository = AndroidSubmissionWorkflowRepository(context, api)
+        authRepository: AuthRepository,
+        workflowDao: WorkflowDao,
+        scheduler: WorkflowWorkScheduler,
+        syncEngine: WorkflowSyncEngine,
+    ): SubmissionWorkflowRepository = AndroidSubmissionWorkflowRepository(context, api, authRepository, workflowDao, scheduler, syncEngine)
 }

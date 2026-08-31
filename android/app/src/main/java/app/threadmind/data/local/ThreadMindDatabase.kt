@@ -65,6 +65,9 @@ interface WorkflowDao {
     @Query("select * from pending_submissions where accountId = :accountId and id = :submissionId")
     suspend fun submission(accountId: String, submissionId: String): PendingSubmissionEntity?
 
+    @Query("select * from pending_submissions where accountId = :accountId order by updatedAtEpochMillis desc limit 1")
+    suspend fun latestSubmission(accountId: String): PendingSubmissionEntity?
+
     @Query("select * from pending_submissions where accountId = :accountId and status not in ('ready', 'failed', 'deleted') order by createdAtEpochMillis")
     suspend fun recoverableSubmissions(accountId: String): List<PendingSubmissionEntity>
 
@@ -80,8 +83,27 @@ interface WorkflowDao {
     @Query("select * from action_card_cache where accountId = :accountId and submissionId = :submissionId order by id")
     suspend fun cards(accountId: String, submissionId: String): List<ActionCardCacheEntity>
 
+    @Query("select * from action_card_cache where accountId = :accountId and id = :cardId")
+    suspend fun card(accountId: String, cardId: String): ActionCardCacheEntity?
+
+    @Query("update action_card_cache set status = :status, payloadJson = :payloadJson, updatedAtEpochMillis = :updatedAt where accountId = :accountId and id = :cardId")
+    suspend fun updateCardOutcome(accountId: String, cardId: String, status: String, payloadJson: String, updatedAt: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertPendingReceipt(entity: PendingReceiptEntity)
+
+    @Transaction
+    suspend fun recordPendingReceipt(
+        entity: PendingReceiptEntity,
+        cardStatus: String,
+        cardPayloadJson: String?,
+        updatedAt: Long,
+    ) {
+        upsertPendingReceipt(entity)
+        if (cardPayloadJson != null) {
+            updateCardOutcome(entity.accountId, entity.actionCardId, cardStatus, cardPayloadJson, updatedAt)
+        }
+    }
 
     @Query("select * from pending_receipts where accountId = :accountId order by createdAtEpochMillis")
     suspend fun pendingReceipts(accountId: String): List<PendingReceiptEntity>

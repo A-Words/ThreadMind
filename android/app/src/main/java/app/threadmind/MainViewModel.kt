@@ -45,6 +45,15 @@ data class MainUiState(
 
 enum class BackendStatus { IDLE, CHECKING, CONNECTED, FAILED }
 
+private fun progressMessage(progress: SubmissionProgress) = when (progress.status) {
+    "pending_upload" -> "截图已保存在设备上，等待网络上传"
+    "uploaded" -> "截图已上传，等待安全分析"
+    "processing" -> "正在识别对话和行动依据…"
+    "ready" -> "分析完成：${progress.cards.size} 张待审核卡片，云端原图已删除"
+    "failed" -> "分析失败（${progress.failureCode ?: "analysis_failed"}），云端原图已进入清理流程"
+    else -> "正在处理提交"
+}
+
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val providerExecutor: ProviderExecutor,
@@ -140,14 +149,9 @@ class MainViewModel @Inject constructor(
         if (current.submissionId != progress.submissionId) current else current.copy(
             submissionStatus = progress.status,
             isSubmissionPending = progress.status !in setOf("ready", "failed"),
-            submissionMessage = when (progress.status) {
-                "uploaded" -> "截图已上传，等待安全分析"
-                "processing" -> "正在识别对话和行动依据…"
-                "ready" -> "分析完成：${progress.cards.size} 张待审核卡片，云端原图已删除"
-                "failed" -> "分析失败（${progress.failureCode ?: "analysis_failed"}），云端原图已进入清理流程"
-                else -> "正在处理提交"
-            },
+            submissionMessage = progressMessage(progress),
             cards = if (progress.status == "ready") progress.cards else current.cards,
+            pendingReceipts = progress.pendingReceipts,
         )
     }
 
@@ -163,14 +167,20 @@ class MainViewModel @Inject constructor(
             mutableState.update {
                 it.copy(backendStatus = BackendStatus.CHECKING, backendMessage = "正在验证服务端身份…")
             }
-            runCatching { api.listMemories() }
-                .onSuccess { response ->
+            runCatching { api.listMemories() to submissions.restoreLatest() }
+                .onSuccess { (response, restored) ->
                     mutableState.update {
                         it.copy(
                             backendStatus = BackendStatus.CONNECTED,
                             backendMessage = "服务端已连接（${response.items.size} 条记忆）",
                             memories = response.items,
                             memoryMessage = null,
+                            submissionId = restored?.submissionId,
+                            submissionStatus = restored?.status,
+                            isSubmissionPending = restored != null && restored.status !in setOf("ready", "failed"),
+                            cards = restored?.cards.orEmpty(),
+                            pendingReceipts = restored?.pendingReceipts.orEmpty(),
+                            submissionMessage = restored?.let(::progressMessage),
                         )
                     }
                 }
@@ -300,6 +310,10 @@ class MainViewModel @Inject constructor(
     suspend fun execute(cardId: String) {
         val card = state.value.cards.single { it.id == cardId }
         require(card.status == ActionStatus.CONFIRMED)
+        if (cardId in state.value.pendingReceipts) {
+            mutableState.update { it.copy(message = "执行回执尚未同步，请勿再次写入系统") }
+            return
+        }
         setCardPending(cardId, true)
         mutableState.update { current -> current.copy(cards = current.cards.map { if (it.id == cardId) it.copy(status = ActionStatus.EXECUTING) else it }) }
         val result = runCatching { providerExecutor.execute(requireNotNull(card.confirmedSnapshot)) }

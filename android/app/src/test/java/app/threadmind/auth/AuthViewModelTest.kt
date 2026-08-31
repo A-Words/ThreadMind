@@ -290,6 +290,7 @@ private class FakeAuthRepository(initialSession: AuthSession? = null) : AuthRepo
     private var session: AuthSession? = initialSession
 
     override suspend fun restoreSession(): AuthSession? = session
+    override fun currentUserId(): String? = session?.userId
     override fun currentAccessToken(): String? = session?.let { "access-token" }
 
     override suspend fun signInWithPassword(email: String, password: String): AuthSession {

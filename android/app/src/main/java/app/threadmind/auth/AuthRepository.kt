@@ -17,6 +17,7 @@ enum class EmailOtpPurpose {
 }
 
 interface AuthRepository : AccessTokenProvider {
+    fun currentUserId(): String?
     suspend fun restoreSession(): AuthSession?
     suspend fun signInWithPassword(email: String, password: String): AuthSession
     suspend fun signUpWithPassword(email: String, password: String): AuthSession?
@@ -31,6 +32,7 @@ interface AuthRepository : AccessTokenProvider {
 class UnavailableAuthRepository(
     private val reason: String,
 ) : AuthRepository {
+    override fun currentUserId(): String? = null
     override suspend fun restoreSession(): AuthSession? = null
     override fun currentAccessToken(): String? = null
     override suspend fun signInWithPassword(email: String, password: String): Nothing = error(reason)

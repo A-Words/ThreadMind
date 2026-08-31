@@ -9,6 +9,8 @@ import io.github.jan.supabase.auth.providers.builtin.OTP
 class SupabaseAuthRepository(
     private val client: SupabaseClient,
 ) : AuthRepository {
+    override fun currentUserId(): String? = client.auth.currentSessionOrNull()?.user?.id
+
     override suspend fun restoreSession(): AuthSession? {
         client.auth.awaitInitialization()
         return currentSession()
