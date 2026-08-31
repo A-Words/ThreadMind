@@ -25,11 +25,16 @@ export function createTokenVerifier(config: AuthConfig) {
   const keySet = createRemoteJWKSet(new URL(config.jwksUrl));
   return async (authorization: string | undefined): Promise<VerifiedIdentity> => {
     if (!authorization?.startsWith("Bearer ")) throw new DomainError("unauthorized", "Bearer token is required");
-    const { payload } = await jwtVerify(authorization.slice(7), keySet, {
-      issuer: config.issuer,
-      audience: config.audience,
-      requiredClaims: ["sub"],
-    });
+    let payload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
+    try {
+      ({ payload } = await jwtVerify(authorization.slice(7), keySet, {
+        issuer: config.issuer,
+        audience: config.audience,
+        requiredClaims: ["sub"],
+      }));
+    } catch {
+      throw new DomainError("unauthorized", "Bearer token is invalid or expired");
+    }
     if (!payload.sub) throw new DomainError("unauthorized", "Token subject is required");
     return {
       accountId: payload.sub,

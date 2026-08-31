@@ -7,6 +7,21 @@ import { InMemorySensitiveSessionVerifier } from "../src/account/sensitive-sessi
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { InMemoryTemporaryImageStorage } from "../src/adapters/temporary-image-storage.js";
 
+describe("Authentication API", () => {
+  it("rejects missing bearer credentials without exposing verifier details", async () => {
+    const app = buildApp(undefined, {
+      auth: { jwksUrl: "https://example.invalid/.well-known/jwks.json", issuer: "https://issuer.invalid", audience: "authenticated" },
+    });
+    const response = await app.inject({ method: "GET", url: "/v1/memories" });
+    assert.equal(response.statusCode, 401);
+    assert.deepEqual(response.json(), { error: "unauthorized", message: "Bearer token is required" });
+    const malformed = await app.inject({ method: "GET", url: "/v1/memories", headers: { authorization: "Bearer not-a-jwt" } });
+    assert.equal(malformed.statusCode, 401);
+    assert.deepEqual(malformed.json(), { error: "unauthorized", message: "Bearer token is invalid or expired" });
+    await app.close();
+  });
+});
+
 describe("Action Card API", () => {
   it("isolates cards by account and executes only after confirmation", async () => {
     const app = buildApp(undefined, { allowInsecureAccountHeader: true });
