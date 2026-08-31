@@ -409,6 +409,8 @@ describe("Account data API", () => {
 
     const response = await app.inject({ method: "DELETE", url: "/v1/account", headers: { "x-account-id": "a1" } });
     assert.equal(response.statusCode, 500);
+    assert.deepEqual(response.json(), { error: "internal_error", message: "Request could not be completed" });
+    assert.equal(response.body.includes("auth_admin_unavailable"), false);
     assert.equal(store.submissions.has(submissionId), true);
     assert.equal(temporaryImages.has(`a1/${submissionId}`), false);
     await app.close();

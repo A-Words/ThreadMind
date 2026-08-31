@@ -58,7 +58,7 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) return reply.code(domainErrorStatus(error.code)).send({ error: error.code, message: error.message });
     if (error instanceof ZodError) return reply.code(400).send({ error: "invalid_request", message: error.message });
-    return reply.send(error);
+    return reply.code(500).send({ error: "internal_error", message: "Request could not be completed" });
   });
   app.addHook("preHandler", async (request, reply) => {
     if (request.url === "/health") return;
