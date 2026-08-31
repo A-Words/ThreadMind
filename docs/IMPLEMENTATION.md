@@ -85,6 +85,7 @@ Supabase Hosted 项目的 Auth 配置必须满足：
 4. `server/migrations/20260830181534_add_action_card_review_metadata.sql` 为 Action Card 增加字段级置信度与待处理校验问题，供低置信和歧义审核使用。
 5. `server/migrations/20260831070229_add_memory_source_evidence.sql` 为 Memory 增加可展示、可检索且随删除抹除的来源证据。
 6. `server/migrations/20260831073538_add_insight_generation_key.sql` 为 Insight 增加幂等生成键、Submission 级联外键与历史索引。
+7. `server/migrations/20260831130616_verify_active_session.sql` 暴露最小权限的 session 存活检查；账户导出和账户删除除 JWT 验签外还必须验证 `session_id` 仍属于当前账户。
 
 截图上传和账户硬删除还要求服务端环境配置 `SUPABASE_URL`、仅服务端可见的 `SUPABASE_SECRET_KEY`，以及可选的 `SUPABASE_STORAGE_BUCKET`。Android 仍只配置 publishable key；secret key 不得写入 `local.properties`、APK 或客户端日志。
 

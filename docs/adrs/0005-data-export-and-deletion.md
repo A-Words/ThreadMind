@@ -43,7 +43,7 @@ ThreadMind 的主数据位于私有 PostgreSQL schema，临时截图位于私有
 2. 使用仅服务端可见的 Supabase secret key 调用 Auth Admin API 硬删除当前 `auth.users` 记录。
 3. 依靠 `ON DELETE CASCADE` 删除 ThreadMind 应用表和 Auth sessions；重复删除或结果不确定时按幂等状态核对。
 
-删除 Auth 用户会撤销 refresh token，但已签发 access token 在到期前仍可能通过纯 JWT 签名验证。ThreadMind 的业务表均引用 `auth.users`，因此旧 token 不能重建账户数据；生产环境同时保持短时 JWT。若未来加入不引用 `auth.users` 的敏感资源，必须在访问前验证 JWT `session_id` 仍存在。
+删除 Auth 用户会撤销 refresh token，但已签发 access token 在到期前仍可能通过纯 JWT 签名验证。账户导出和账户删除因此先通过最小权限的 `threadmind.is_active_session` 检查 JWT `session_id` 仍属于当前账户；ThreadMind 的业务表同时均引用 `auth.users`，旧 token 不能重建账户数据。生产环境仍保持短时 JWT，未来敏感资源也必须复用同一 session 校验门。
 
 Android 收到成功后清除该账户的 Room 数据与待执行 WorkManager 作业，再清除本地 Supabase session。联系人和日历中已经成功创建的记录不随账户删除自动移除。
 
