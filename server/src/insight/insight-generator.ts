@@ -32,7 +32,9 @@ export class EvidenceBackedInsightGenerator implements InsightGenerator {
       evidence: [receiptEvidence],
     }];
 
-    const relatedMemory = input.memories.find((memory) => isRelated(memory, input.card));
+    const currentActionSource = `${input.card.submissionId}:receipt:${input.receipt.id}`;
+    const relatedMemory = input.memories.find((memory) =>
+      !memory.sourceRefs.includes(currentActionSource) && isRelated(memory, input.card));
     if (relatedMemory && relatedMemory.sourceEvidence.length > 0) {
       items.push({
         kind: "relationship_context",
@@ -57,6 +59,17 @@ export class EvidenceBackedInsightGenerator implements InsightGenerator {
         evidence: input.card.evidence,
         suggestedAction: "会前复核参与人背景与承诺",
         suggestedAt: meetingStart,
+      });
+    } else if (input.card.type !== "create_meeting" && input.card.evidence.length > 0) {
+      items.push({
+        kind: "next_step",
+        title: "下次联系前核对",
+        explanation: "联系人信息已经写入通讯录；下次联系前可结合本次对话依据和有效历史记忆准备跟进。",
+        epistemicStatus: "inference",
+        confidence: 0.75,
+        evidenceRefs: unique(input.card.evidence.map((evidence) => evidence.sourceId)),
+        evidence: input.card.evidence,
+        suggestedAction: "下次联系前复核本次更新和相关背景",
       });
     }
 
