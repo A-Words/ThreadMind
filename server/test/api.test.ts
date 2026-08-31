@@ -41,7 +41,11 @@ describe("Action Card API", () => {
     const hiddenInsights = await app.inject({ method: "GET", url: `/v1/insights?submissionId=${submissionId}`, headers: { "x-account-id": "a2" } });
     assert.deepEqual(hiddenInsights.json().items, []);
     const memories = await app.inject({ method: "GET", url: "/v1/memories", headers: { "x-account-id": "a1" } });
-    assert.deepEqual(memories.json().items, []);
+    assert.equal(memories.json().items.length, 1);
+    assert.equal(memories.json().items[0].epistemicStatus, "fact");
+    assert.equal(memories.json().items[0].confidence, 1);
+    assert.match(memories.json().items[0].assertion, /contact-42/);
+    assert.deepEqual(memories.json().items[0].sourceRefs, [`${submissionId}:receipt:${receiptId}`]);
     await app.close();
   });
 
@@ -60,6 +64,8 @@ describe("Action Card API", () => {
     assert.equal(failed.statusCode, 201);
     const insights = await app.inject({ method: "GET", url: `/v1/insights?submissionId=${submissionId}`, headers: { "x-account-id": "a1" } });
     assert.deepEqual(insights.json().items, []);
+    const memories = await app.inject({ method: "GET", url: "/v1/memories", headers: { "x-account-id": "a1" } });
+    assert.deepEqual(memories.json().items, []);
     await app.close();
   });
 
@@ -198,6 +204,13 @@ describe("Submission API", () => {
       targetAccountId: "local", evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 0.99 }],
     }});
     assert.equal(action.statusCode, 201);
+    await app.inject({ method: "POST", url: `/v1/action-cards/${action.json().id}/confirm`, headers: { "x-account-id": "a1" }, payload: { expectedVersion: 1 } });
+    const actionReceiptId = randomUUID();
+    await app.inject({ method: "POST", url: `/v1/action-cards/${action.json().id}/receipts`, headers: { "x-account-id": "a1" }, payload: {
+      receiptId: actionReceiptId, status: "succeeded", targetRecordId: "contact-42",
+    }});
+    const actionMemory = [...store.memories.values()].find((item) => item.sourceRefs.includes(`${submissionId}:receipt:${actionReceiptId}`));
+    assert.ok(actionMemory);
     const cards = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}/action-cards`, headers: { "x-account-id": "a1" } });
     assert.equal(cards.statusCode, 200);
     assert.deepEqual(cards.json().items.map((item: { id: string }) => item.id), [action.json().id]);
@@ -224,6 +237,7 @@ describe("Submission API", () => {
     assert.equal([...store.jobs.values()].some((job) => job.aggregateId === submissionId), false);
     assert.equal([...store.cards.values()].some((card) => card.submissionId === submissionId), false);
     assert.equal(store.memories.get(memory.json().id)?.assertion, "[deleted]");
+    assert.equal(store.memories.get(actionMemory.id)?.assertion, "[deleted]");
     const repeatedDelete = await app.inject({ method: "DELETE", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a1" } });
     assert.equal(repeatedDelete.statusCode, 204);
     await app.close();

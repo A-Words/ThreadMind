@@ -81,7 +81,7 @@ function collectStrings(value: unknown): string[] {
 }
 
 function meetingStartAt(fields: Record<string, unknown>): string | undefined {
-  for (const key of ["startAt", "startTime", "start", "startDateTime"]) {
+  for (const key of ["startsAt", "startAt", "startTime", "start", "startDateTime"]) {
     const value = fields[key];
     if (typeof value === "string" && value.trim()) return value;
   }
