@@ -58,6 +58,7 @@ import app.threadmind.auth.AuthViewModel
 import app.threadmind.domain.ActionCard
 import app.threadmind.domain.ActionStatus
 import app.threadmind.domain.ActionType
+import app.threadmind.domain.actionFieldSpecs
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.InsightBundleResponse
 import app.threadmind.provider.ProviderPreflightResult
@@ -475,20 +476,35 @@ private fun ActionCardReviewCard(
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(fields["title"] ?: fields["displayName"] ?: card.type.name, style = MaterialTheme.typography.titleMedium)
             Text("版本 ${card.version} · ${card.status}")
-            fields.toSortedMap().forEach { (field, value) ->
+            val specs = actionFieldSpecs(card.type)
+            val knownFields = specs.mapTo(mutableSetOf()) { it.key }
+            specs.filterNot { it.providerManaged && card.fields[it.key].isNullOrBlank() }.forEach { spec ->
+                val field = spec.key
+                val value = fields[field].orEmpty()
+                val confidence = card.fieldConfidence[field]
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { updated -> fields = fields + (field to updated) },
+                    enabled = editable && !isPending && !spec.providerManaged,
+                    label = {
+                        Text(
+                            buildString {
+                                append(spec.label)
+                                if (spec.required) append("（必填）")
+                                if (confidence != null) append(" · ${(confidence * 100).toInt()}%${if (confidence < 0.8) " 低置信" else ""}")
+                            },
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            fields.filterKeys { it !in knownFields }.toSortedMap().forEach { (field, value) ->
                 val confidence = card.fieldConfidence[field]
                 OutlinedTextField(
                     value = value,
                     onValueChange = { updated -> fields = fields + (field to updated) },
                     enabled = editable && !isPending,
-                    label = {
-                        Text(
-                            buildString {
-                                append(field)
-                                if (confidence != null) append(" · ${(confidence * 100).toInt()}%${if (confidence < 0.8) " 低置信" else ""}")
-                            },
-                        )
-                    },
+                    label = { Text("$field${confidence?.let { " · ${(it * 100).toInt()}%${if (it < 0.8) " 低置信" else ""}" }.orEmpty()}") },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

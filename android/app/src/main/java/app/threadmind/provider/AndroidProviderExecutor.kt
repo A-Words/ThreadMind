@@ -57,6 +57,7 @@ class AndroidProviderExecutor @Inject constructor(
         val start = OffsetDateTime.parse(card.fields.getValue("startsAt")).toInstant().toEpochMilli()
         val end = OffsetDateTime.parse(card.fields.getValue("endsAt")).toInstant().toEpochMilli()
         require(end > start) { "会议结束时间必须晚于开始时间" }
+        meetingAttendees(card.fields["attendees"])
         val calendarId = card.fields.getValue("targetCalendarId")
         val uriBuilder = CalendarContract.Instances.CONTENT_URI.buildUpon()
         ContentUris.appendId(uriBuilder, start)
@@ -150,8 +151,22 @@ class AndroidProviderExecutor @Inject constructor(
             put(CalendarContract.Events.CUSTOM_APP_PACKAGE, "app.threadmind")
             put(CalendarContract.Events.CUSTOM_APP_URI, marker)
         }
-        val uri = requireNotNull(resolver.insert(CalendarContract.Events.CONTENT_URI, values))
-        return ProviderResult.Succeeded(ContentUris.parseId(uri).toString())
+        val operations = arrayListOf(
+            ContentProviderOperation.newInsert(CalendarContract.Events.CONTENT_URI)
+                .withValues(values)
+                .build(),
+        )
+        meetingAttendees(snapshot.fields["attendees"]).forEach { address ->
+            operations += ContentProviderOperation.newInsert(CalendarContract.Attendees.CONTENT_URI)
+                .withValueBackReference(CalendarContract.Attendees.EVENT_ID, 0)
+                .withValue(CalendarContract.Attendees.ATTENDEE_EMAIL, address)
+                .withValue(CalendarContract.Attendees.ATTENDEE_TYPE, CalendarContract.Attendees.TYPE_REQUIRED)
+                .withValue(CalendarContract.Attendees.ATTENDEE_STATUS, CalendarContract.Attendees.ATTENDEE_STATUS_INVITED)
+                .build()
+        }
+        val results = resolver.applyBatch(CalendarContract.AUTHORITY, operations)
+        val eventUri = requireNotNull(results.firstOrNull()?.uri) { "Calendar Provider did not return an event URI" }
+        return ProviderResult.Succeeded(ContentUris.parseId(eventUri).toString())
     }
 
     private fun createContact(snapshot: ConfirmedActionSnapshot): ProviderResult {
@@ -179,6 +194,45 @@ class AndroidProviderExecutor @Inject constructor(
                 .withValue(ContactsContract.CommonDataKinds.Note.NOTE, marker)
                 .build(),
         )
+        val primaryField = if (method.contains("@")) "email" else "phone"
+        val extraMethods = listOf("email", "phone").mapNotNull { field ->
+            snapshot.fields[field]?.trim()?.takeIf { it.isNotEmpty() && (field != primaryField || it != method) }?.let { field to it }
+        }
+        extraMethods.forEach { (field, value) ->
+            operations += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(
+                    ContactsContract.Data.MIMETYPE,
+                    if (field == "email") ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE
+                    else ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,
+                )
+                .withValue(ContactsContract.Data.DATA1, value)
+                .build()
+        }
+        val company = snapshot.fields["company"]?.trim().orEmpty()
+        val jobTitle = snapshot.fields["jobTitle"]?.trim().orEmpty()
+        if (company.isNotEmpty() || jobTitle.isNotEmpty()) {
+            operations += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
+                .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, company.ifEmpty { null })
+                .withValue(ContactsContract.CommonDataKinds.Organization.TITLE, jobTitle.ifEmpty { null })
+                .build()
+        }
+        snapshot.fields["address"]?.trim()?.takeIf(String::isNotEmpty)?.let { address ->
+            operations += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.StructuredPostal.CONTENT_ITEM_TYPE)
+                .withValue(ContactsContract.CommonDataKinds.StructuredPostal.FORMATTED_ADDRESS, address)
+                .build()
+        }
+        (snapshot.fields["notes"] ?: snapshot.fields["note"])?.trim()?.takeIf(String::isNotEmpty)?.let { note ->
+            operations += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
+                .withValue(ContactsContract.CommonDataKinds.Note.NOTE, note)
+                .build()
+        }
         resolver.applyBatch(ContactsContract.AUTHORITY, operations)
         return ProviderResult.Succeeded(checkNotNull(existingContactId(marker)) { "Created contact marker was not readable" })
     }
@@ -342,6 +396,12 @@ class AndroidProviderExecutor @Inject constructor(
 
     private fun descriptor(field: String) = descriptors.singleOrNull { it.field == field }
         ?: error("Unsupported contact field: $field")
+
+    private fun meetingAttendees(value: String?): List<String> = value.orEmpty()
+        .split(',', ';', '\n')
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .onEach { require(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(it)) { "参与人必须是可识别的邮箱地址：$it" } }
 
     private companion object {
         val json = Json { ignoreUnknownKeys = false; explicitNulls = false }
