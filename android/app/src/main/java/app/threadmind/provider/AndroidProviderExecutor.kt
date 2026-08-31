@@ -196,8 +196,8 @@ class AndroidProviderExecutor @Inject constructor(
     }
 
     private fun createContact(snapshot: ConfirmedActionSnapshot): ProviderResult {
-        val marker = "ThreadMind:${snapshot.idempotencyKey}"
-        existingContactId(marker)?.let { return ProviderResult.Succeeded(it) }
+        val marker = providerActionMarker(snapshot)
+        existingActionContactId(marker)?.let { return ProviderResult.Succeeded(it) }
         val method = snapshot.fields.getValue("contactMethod")
         val accountName = snapshot.fields["accountName"]?.trim()?.takeIf(String::isNotEmpty)
         val accountType = snapshot.fields["accountType"]?.trim()?.takeIf(String::isNotEmpty)
@@ -218,8 +218,8 @@ class AndroidProviderExecutor @Inject constructor(
                 .build(),
             ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                 .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-                .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
-                .withValue(ContactsContract.CommonDataKinds.Note.NOTE, marker)
+                .withValue(ContactsContract.Data.MIMETYPE, ACTION_MARKER_MIME_TYPE)
+                .withValue(ContactsContract.Data.DATA1, marker)
                 .build(),
         )
         val primaryField = if (method.contains("@")) "email" else "phone"
@@ -262,10 +262,19 @@ class AndroidProviderExecutor @Inject constructor(
                 .build()
         }
         resolver.applyBatch(ContactsContract.AUTHORITY, operations)
-        return ProviderResult.Succeeded(checkNotNull(existingContactId(marker)) { "Created contact marker was not readable" })
+        return ProviderResult.Succeeded(checkNotNull(existingActionContactId(marker)) { "Created contact marker was not readable" })
     }
 
-    private fun existingContactId(marker: String): String? {
+    private fun existingActionContactId(marker: String): String? {
+        resolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data.CONTACT_ID),
+            "${ContactsContract.Data.MIMETYPE} = ? AND ${ContactsContract.Data.DATA1} = ?",
+            arrayOf(ACTION_MARKER_MIME_TYPE, marker),
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) return cursor.getLong(0).toString()
+        }
         resolver.query(
             ContactsContract.Data.CONTENT_URI,
             arrayOf(ContactsContract.Data.CONTACT_ID),
@@ -280,6 +289,11 @@ class AndroidProviderExecutor @Inject constructor(
 
     private fun updateContact(snapshot: ConfirmedActionSnapshot): ProviderResult {
         val targetId = snapshot.fields.getValue("targetContactId")
+        val marker = providerActionMarker(snapshot)
+        existingActionContactId(marker)?.let { existingId ->
+            require(existingId == targetId) { "Action marker belongs to a different contact" }
+            return ProviderResult.Succeeded(existingId)
+        }
         val changes = json.decodeFromString<List<ContactFieldChange>>(snapshot.fields.getValue("changes"))
         require(changes.isNotEmpty()) { "At least one reviewed contact change is required" }
         val rawIds = rawContacts(targetId).map { it.id }.toSet()
@@ -309,9 +323,21 @@ class AndroidProviderExecutor @Inject constructor(
                     .withExpectedCount(1)
                     .build()
             }
+        }.toMutableList()
+        operations += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+            .withValue(ContactsContract.Data.RAW_CONTACT_ID, changes.first().rawContactId.toLong())
+            .withValue(ContactsContract.Data.MIMETYPE, ACTION_MARKER_MIME_TYPE)
+            .withValue(ContactsContract.Data.DATA1, marker)
+            .build()
+        try {
+            resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(operations))
+        } catch (error: Throwable) {
+            if (existingActionContactId(marker) == targetId) return ProviderResult.Succeeded(targetId)
+            throw error
         }
-        resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(operations))
-        return ProviderResult.Succeeded(targetId)
+        return ProviderResult.Succeeded(
+            checkNotNull(existingActionContactId(marker)) { "Updated contact marker was not readable" },
+        )
     }
 
     private fun contactMatches(method: String?, displayName: String): Map<String, String> {
@@ -520,6 +546,7 @@ class AndroidProviderExecutor @Inject constructor(
             ?: card.targetAccountId?.takeUnless { it == "local" }
 
     private companion object {
+        const val ACTION_MARKER_MIME_TYPE = "vnd.android.cursor.item/vnd.app.threadmind.action"
         val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
         val json = Json { ignoreUnknownKeys = false; explicitNulls = false }
         val descriptors = listOf(
@@ -535,3 +562,6 @@ class AndroidProviderExecutor @Inject constructor(
 
 internal fun isWritableContactAccount(accountType: String?, writableAccountTypes: Set<String>): Boolean =
     accountType == null || accountType in writableAccountTypes
+
+internal fun providerActionMarker(snapshot: ConfirmedActionSnapshot): String =
+    "ThreadMind:${snapshot.idempotencyKey}"
