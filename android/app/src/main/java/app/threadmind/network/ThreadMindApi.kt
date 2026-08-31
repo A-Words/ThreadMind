@@ -15,6 +15,7 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.Response as RetrofitResponse
@@ -28,11 +29,15 @@ import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 
 @Serializable
 data class MemoryListResponse(val items: List<MemoryRecordResponse>)
+
+@Serializable
+data class ClearMemoriesResponse(val cleared: Int)
 
 @Serializable
 data class InsightListResponse(val items: List<InsightBundleResponse>)
@@ -193,6 +198,9 @@ interface ThreadMindApi {
     @GET("v1/submissions/{id}")
     suspend fun getSubmission(@Path("id") id: String): SubmissionResponse
 
+    @DELETE("v1/submissions/{id}")
+    suspend fun deleteSubmission(@Path("id") id: String): RetrofitResponse<Unit>
+
     @GET("v1/submissions/{id}/action-cards")
     suspend fun listActionCards(@Path("id") id: String): ActionCardListResponse
 
@@ -228,6 +236,16 @@ interface ThreadMindApi {
 
     @DELETE("v1/memories/{id}")
     suspend fun deleteMemory(@Path("id") id: String): RetrofitResponse<Unit>
+
+    @DELETE("v1/memories")
+    suspend fun clearMemories(): ClearMemoriesResponse
+
+    @Streaming
+    @GET("v1/account/export")
+    suspend fun exportAccount(): ResponseBody
+
+    @DELETE("v1/account")
+    suspend fun deleteAccount(): RetrofitResponse<Unit>
 }
 
 class UnavailableThreadMindApi(
@@ -235,6 +253,7 @@ class UnavailableThreadMindApi(
 ) : ThreadMindApi {
     override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): Nothing = error(reason)
     override suspend fun getSubmission(id: String): Nothing = error(reason)
+    override suspend fun deleteSubmission(id: String): Nothing = error(reason)
     override suspend fun listActionCards(id: String): Nothing = error(reason)
     override suspend fun confirmActionCard(id: String, request: CardVersionRequest): Nothing = error(reason)
     override suspend fun editActionCard(id: String, request: ActionCardEditRequest): Nothing = error(reason)
@@ -244,6 +263,9 @@ class UnavailableThreadMindApi(
     override suspend fun listInsights(submissionId: String?): Nothing = error(reason)
     override suspend fun reviseMemory(id: String, request: MemoryRevisionRequest): Nothing = error(reason)
     override suspend fun deleteMemory(id: String): Nothing = error(reason)
+    override suspend fun clearMemories(): Nothing = error(reason)
+    override suspend fun exportAccount(): Nothing = error(reason)
+    override suspend fun deleteAccount(): Nothing = error(reason)
 }
 
 class BearerTokenInterceptor(

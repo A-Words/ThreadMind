@@ -18,6 +18,8 @@ import app.threadmind.network.ActionCardListResponse
 import app.threadmind.network.ActionCardEditRequest
 import app.threadmind.network.ActionCardResponse
 import app.threadmind.network.ActionReceiptRequest
+import app.threadmind.network.AccountExportPayload
+import app.threadmind.network.ClearMemoriesResponse
 import app.threadmind.network.CardVersionRequest
 import app.threadmind.network.SubmissionResponse
 import app.threadmind.network.SubmissionProgress
@@ -39,6 +41,8 @@ import org.junit.Test
 import retrofit2.Response
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
+import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModelTest {
@@ -163,12 +167,44 @@ class MainViewModelTest {
         assertEquals(true, api.lastMemoryCreatedFrom?.isNotBlank())
         assertEquals("找到 1 条活动记忆", viewModel.state.value.memoryMessage)
     }
+
+    @Test fun `data controls delete submission clear memory export and delete account`() = runTest(dispatcher) {
+        val submissions = FakeSubmissionWorkflowRepository(
+            restored = SubmissionProgress("submission-1", "ready", listOf(actionCard())),
+        )
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), submissions)
+        viewModel.checkBackend()
+        runCurrent()
+
+        viewModel.deleteCurrentSubmission()
+        runCurrent()
+        assertEquals(listOf("submission-1"), submissions.deletedSubmissionIds)
+        assertEquals(null, viewModel.state.value.submissionId)
+        assertEquals("本次提交及其派生数据已删除", viewModel.state.value.dataMessage)
+
+        viewModel.clearAllMemories()
+        runCurrent()
+        assertEquals(emptyList<MemoryRecordResponse>(), viewModel.state.value.memories)
+        assertEquals("长期记忆已全部清除", viewModel.state.value.dataMessage)
+
+        viewModel.requestAccountExport()
+        runCurrent()
+        assertEquals("threadmind-export.json", viewModel.state.value.pendingExport?.fileName)
+
+        viewModel.deleteAccount()
+        runCurrent()
+        assertEquals(true, submissions.accountDeleted)
+        assertEquals(true, viewModel.state.value.accountDeleted)
+    }
 }
 
 private class FakeSubmissionWorkflowRepository(
     private val restored: SubmissionProgress? = null,
 ) : SubmissionWorkflowRepository {
     val receipts = mutableListOf<ActionReceiptRequest>()
+    val deletedSubmissionIds = mutableListOf<String>()
+    var writtenExportUri: Uri? = null
+    var accountDeleted = false
 
     override suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String) = error("unused")
     override suspend fun refresh(submissionId: String): SubmissionProgress = error("unused")
@@ -178,6 +214,11 @@ private class FakeSubmissionWorkflowRepository(
     override suspend fun confirm(cardId: String, expectedVersion: Int) = ActionCardPolicy.confirm(actionCard().copy(version = expectedVersion))
     override suspend fun cancel(cardId: String) = Unit
     override suspend fun reportExecution(cardId: String, request: ActionReceiptRequest) { receipts += request }
+    override suspend fun deleteSubmission(submissionId: String) { deletedSubmissionIds += submissionId }
+    override suspend fun clearMemories(): Int = 1
+    override suspend fun prepareAccountExport() = AccountExportPayload("request-1", "threadmind-export.json", "{\"format\":\"threadmind-export-v1\"}")
+    override suspend fun writeAccountExport(uri: Uri, payload: AccountExportPayload) { writtenExportUri = uri }
+    override suspend fun deleteAccount() { accountDeleted = true }
 }
 
 private fun actionCard() = ActionCard(
@@ -219,6 +260,7 @@ private class FakeThreadMindApi : ThreadMindApi {
 
     override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): SubmissionResponse = error("unused")
     override suspend fun getSubmission(id: String): SubmissionResponse = error("unused")
+    override suspend fun deleteSubmission(id: String): Response<Unit> = Response.success(Unit)
     override suspend fun listActionCards(id: String): ActionCardListResponse = error("unused")
     override suspend fun confirmActionCard(id: String, request: CardVersionRequest): ActionCardResponse = error("unused")
     override suspend fun editActionCard(id: String, request: ActionCardEditRequest): ActionCardResponse = error("unused")
@@ -240,6 +282,10 @@ private class FakeThreadMindApi : ThreadMindApi {
         memory = null
         return Response.success(Unit)
     }
+
+    override suspend fun clearMemories() = ClearMemoriesResponse(1)
+    override suspend fun exportAccount(): ResponseBody = "{}".toResponseBody()
+    override suspend fun deleteAccount(): Response<Unit> = Response.success(Unit)
 }
 
 private fun memoryRecord(

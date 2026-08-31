@@ -92,6 +92,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ThreadMindRoot(authViewModel: AuthViewModel, mainViewModel: MainViewModel) {
     val authState by authViewModel.state.collectAsStateWithLifecycle()
+    val mainState by mainViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(mainState.accountDeleted) {
+        if (mainState.accountDeleted) {
+            authViewModel.accountDeleted()
+            mainViewModel.consumeAccountDeleted()
+        }
+    }
     if (authState.isInitializing) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
@@ -143,6 +150,9 @@ private fun ThreadMindScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingCardId by remember { mutableStateOf<String?>(null) }
     var memoryToDelete by remember { mutableStateOf<MemoryRecordResponse?>(null) }
+    var confirmSubmissionDelete by remember { mutableStateOf(false) }
+    var confirmMemoryClear by remember { mutableStateOf(false) }
+    var confirmAccountDelete by remember { mutableStateOf(false) }
     var memoryTypeMenuExpanded by remember { mutableStateOf(false) }
     var memoryTimeMenuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { viewModel.checkBackend() }
@@ -152,6 +162,13 @@ private fun ThreadMindScreen(
         onClearAuthFeedback()
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent(), viewModel::importImage)
+    val exportDocument = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+        viewModel::saveAccountExport,
+    )
+    LaunchedEffect(state.pendingExport?.requestId) {
+        state.pendingExport?.let { exportDocument.launch(it.fileName) }
+    }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         val cardId = pendingCardId
         pendingCardId = null
@@ -209,6 +226,31 @@ private fun ThreadMindScreen(
                 if (state.submissionId != null && !state.isSubmissionPending && state.submissionStatus != "ready") {
                     TextButton(onClick = viewModel::refreshSubmission) { Text("刷新分析状态") }
                 }
+            }
+            item {
+                Text("数据管理", style = MaterialTheme.typography.headlineSmall)
+                Text("导出不包含原始截图；删除操作会清理云端结构化记录和设备内的 ThreadMind 缓存，不会删除已写入系统通讯录或日历的记录。")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = viewModel::requestAccountExport, enabled = !state.isDataOperationPending) {
+                        Text("导出数据")
+                    }
+                    if (state.submissionId != null) {
+                        TextButton(
+                            onClick = { confirmSubmissionDelete = true },
+                            enabled = !state.isDataOperationPending,
+                        ) { Text("删除本次提交") }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { confirmMemoryClear = true }, enabled = !state.isDataOperationPending) {
+                        Text("清空全部记忆")
+                    }
+                    TextButton(onClick = { confirmAccountDelete = true }, enabled = !state.isDataOperationPending) {
+                        Text("删除账户")
+                    }
+                }
+                if (state.isDataOperationPending) CircularProgressIndicator()
+                state.dataMessage?.let { Text(it) }
             }
             item {
                 Row(
@@ -341,6 +383,48 @@ private fun ThreadMindScreen(
             dismissButton = {
                 TextButton(onClick = { memoryToDelete = null }) { Text("取消") }
             },
+        )
+    }
+    if (confirmSubmissionDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmSubmissionDelete = false },
+            title = { Text("删除本次提交？") },
+            text = { Text("相关 Action Cards、执行回执、记忆来源和洞察历史都会删除，且无法恢复。") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmSubmissionDelete = false
+                    viewModel.deleteCurrentSubmission()
+                }) { Text("确认删除") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSubmissionDelete = false }) { Text("取消") } },
+        )
+    }
+    if (confirmMemoryClear) {
+        AlertDialog(
+            onDismissRequest = { confirmMemoryClear = false },
+            title = { Text("清空全部记忆？") },
+            text = { Text("所有活动记忆会立即停止参与后续召回；提交和洞察历史不会因此删除。") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmMemoryClear = false
+                    viewModel.clearAllMemories()
+                }) { Text("确认清空") }
+            },
+            dismissButton = { TextButton(onClick = { confirmMemoryClear = false }) { Text("取消") } },
+        )
+    }
+    if (confirmAccountDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmAccountDelete = false },
+            title = { Text("永久删除账户？") },
+            text = { Text("账户、截图缓存、提交、卡片、回执、记忆和洞察都会删除且无法恢复。已写入系统通讯录或日历的记录不会被删除。") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmAccountDelete = false
+                    viewModel.deleteAccount()
+                }) { Text("永久删除") }
+            },
+            dismissButton = { TextButton(onClick = { confirmAccountDelete = false }) { Text("取消") } },
         )
     }
 }

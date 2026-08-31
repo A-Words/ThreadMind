@@ -11,6 +11,7 @@ import app.threadmind.network.ThreadMindApi
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.MemoryRevisionRequest
 import app.threadmind.network.ActionReceiptRequest
+import app.threadmind.network.AccountExportPayload
 import app.threadmind.network.InsightBundleResponse
 import app.threadmind.network.SubmissionProgress
 import app.threadmind.network.SubmissionWorkflowRepository
@@ -54,6 +55,10 @@ data class MainUiState(
     val insights: List<InsightBundleResponse> = emptyList(),
     val isInsightLoading: Boolean = false,
     val insightMessage: String? = null,
+    val isDataOperationPending: Boolean = false,
+    val dataMessage: String? = null,
+    val pendingExport: AccountExportPayload? = null,
+    val accountDeleted: Boolean = false,
 )
 
 enum class BackendStatus { IDLE, CHECKING, CONNECTED, FAILED }
@@ -335,6 +340,107 @@ class MainViewModel @Inject constructor(
                 finishMemoryRequest(id, error.message ?: "记忆删除失败")
             }
         }
+    }
+
+    fun deleteCurrentSubmission() {
+        val submissionId = state.value.submissionId ?: return
+        submissionJob?.cancel()
+        viewModelScope.launch {
+            mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
+            runCatching {
+                submissions.deleteSubmission(submissionId)
+                listMemories(state.value) to api.listInsights()
+            }.onSuccess { (memoryResponse, insightResponse) ->
+                mutableState.update {
+                    it.copy(
+                        selectedImage = null,
+                        selectedImageSource = "in_app",
+                        supplementalText = "",
+                        submissionId = null,
+                        submissionStatus = null,
+                        isSubmissionPending = false,
+                        submissionMessage = null,
+                        cards = emptyList(),
+                        pendingCardIds = emptySet(),
+                        pendingReceipts = emptyMap(),
+                        memories = memoryResponse.items,
+                        insights = insightResponse.items,
+                        isDataOperationPending = false,
+                        dataMessage = "本次提交及其派生数据已删除",
+                    )
+                }
+            }.onFailure { error -> finishDataRequest(error, "提交删除失败") }
+        }
+    }
+
+    fun clearAllMemories() {
+        viewModelScope.launch {
+            mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
+            runCatching { submissions.clearMemories() }
+                .onSuccess { cleared ->
+                    mutableState.update {
+                        it.copy(
+                            memories = emptyList(),
+                            isDataOperationPending = false,
+                            backendMessage = "服务端已连接（0 条记忆）",
+                            memoryMessage = "已清除 $cleared 条活动记忆",
+                            dataMessage = "长期记忆已全部清除",
+                        )
+                    }
+                }
+                .onFailure { error -> finishDataRequest(error, "记忆清除失败") }
+        }
+    }
+
+    fun requestAccountExport() {
+        viewModelScope.launch {
+            mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
+            runCatching { submissions.prepareAccountExport() }
+                .onSuccess { payload ->
+                    mutableState.update { it.copy(isDataOperationPending = false, pendingExport = payload) }
+                }
+                .onFailure { error -> finishDataRequest(error, "数据导出失败") }
+        }
+    }
+
+    fun saveAccountExport(uri: Uri?) {
+        val payload = state.value.pendingExport ?: return
+        if (uri == null) {
+            mutableState.update { it.copy(pendingExport = null, dataMessage = "已取消导出") }
+            return
+        }
+        viewModelScope.launch {
+            mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
+            runCatching { submissions.writeAccountExport(uri, payload) }
+                .onSuccess {
+                    mutableState.update {
+                        it.copy(isDataOperationPending = false, pendingExport = null, dataMessage = "数据已导出")
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(pendingExport = null) }
+                    finishDataRequest(error, "导出文件写入失败")
+                }
+        }
+    }
+
+    fun deleteAccount() {
+        submissionJob?.cancel()
+        viewModelScope.launch {
+            mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
+            runCatching { submissions.deleteAccount() }
+                .onSuccess { mutableState.value = MainUiState(accountDeleted = true, dataMessage = "账户及云端数据已删除") }
+                .onFailure { error -> finishDataRequest(error, "账户删除失败") }
+        }
+    }
+
+    fun consumeAccountDeleted() = mutableState.update { it.copy(accountDeleted = false) }
+
+    private fun finishDataRequest(error: Throwable, fallback: String) = mutableState.update {
+        it.copy(
+            isDataOperationPending = false,
+            dataMessage = error.message?.takeIf(String::isNotBlank) ?: fallback,
+        )
     }
 
     private fun setMemoryPending(id: String, pending: Boolean) = mutableState.update {

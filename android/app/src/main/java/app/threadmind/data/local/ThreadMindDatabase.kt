@@ -57,6 +57,11 @@ data class PendingReceiptEntity(
     val lastAttemptAtEpochMillis: Long? = null,
 )
 
+data class LocalSubmissionDeletion(
+    val localImagePath: String?,
+    val pendingReceiptIds: List<String>,
+)
+
 @Dao
 interface WorkflowDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -76,6 +81,33 @@ interface WorkflowDao {
 
     @Query("delete from pending_submissions where accountId = :accountId and id = :submissionId")
     suspend fun deleteSubmission(accountId: String, submissionId: String)
+
+    @Query("select localImagePath from pending_submissions where accountId = :accountId and id = :submissionId")
+    suspend fun submissionImagePath(accountId: String, submissionId: String): String?
+
+    @Query("select localImagePath from pending_submissions where accountId = :accountId")
+    suspend fun accountImagePaths(accountId: String): List<String>
+
+    @Query("select receiptId from pending_receipts where accountId = :accountId and actionCardId in (select id from action_card_cache where accountId = :accountId and submissionId = :submissionId)")
+    suspend fun submissionReceiptIds(accountId: String, submissionId: String): List<String>
+
+    @Query("delete from pending_receipts where accountId = :accountId and actionCardId in (select id from action_card_cache where accountId = :accountId and submissionId = :submissionId)")
+    suspend fun deleteSubmissionReceipts(accountId: String, submissionId: String)
+
+    @Query("delete from action_card_cache where accountId = :accountId and submissionId = :submissionId")
+    suspend fun deleteSubmissionCards(accountId: String, submissionId: String)
+
+    @Transaction
+    suspend fun deleteSubmissionData(accountId: String, submissionId: String): LocalSubmissionDeletion {
+        val deletion = LocalSubmissionDeletion(
+            localImagePath = submissionImagePath(accountId, submissionId),
+            pendingReceiptIds = submissionReceiptIds(accountId, submissionId),
+        )
+        deleteSubmissionReceipts(accountId, submissionId)
+        deleteSubmissionCards(accountId, submissionId)
+        deleteSubmission(accountId, submissionId)
+        return deletion
+    }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCards(entities: List<ActionCardCacheEntity>)

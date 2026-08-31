@@ -21,6 +21,8 @@ import javax.inject.Inject
 interface WorkflowWorkScheduler {
     fun enqueueSubmission(accountId: String, submissionId: String)
     fun enqueueReceipt(accountId: String, receiptId: String)
+    fun cancelSubmission(accountId: String, submissionId: String)
+    fun cancelReceipt(accountId: String, receiptId: String)
     fun cancelAccount(accountId: String)
 }
 
@@ -55,6 +57,14 @@ class AndroidWorkflowWorkScheduler @Inject constructor(
 
     override fun cancelAccount(accountId: String) {
         workManager.cancelAllWorkByTag(accountTag(accountId))
+    }
+
+    override fun cancelSubmission(accountId: String, submissionId: String) {
+        workManager.cancelUniqueWork(submissionWorkName(accountId, submissionId))
+    }
+
+    override fun cancelReceipt(accountId: String, receiptId: String) {
+        workManager.cancelUniqueWork(receiptWorkName(accountId, receiptId))
     }
 
     private companion object {

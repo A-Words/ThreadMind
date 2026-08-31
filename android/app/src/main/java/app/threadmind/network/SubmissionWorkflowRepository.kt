@@ -26,6 +26,12 @@ data class SubmissionProgress(
     val pendingReceipts: Map<String, ActionReceiptRequest> = emptyMap(),
 )
 
+data class AccountExportPayload(
+    val requestId: String,
+    val fileName: String,
+    val json: String,
+)
+
 interface SubmissionWorkflowRepository {
     suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String): SubmissionProgress
     suspend fun refresh(submissionId: String): SubmissionProgress
@@ -34,6 +40,11 @@ interface SubmissionWorkflowRepository {
     suspend fun confirm(cardId: String, expectedVersion: Int): ActionCard
     suspend fun cancel(cardId: String)
     suspend fun reportExecution(cardId: String, request: ActionReceiptRequest)
+    suspend fun deleteSubmission(submissionId: String)
+    suspend fun clearMemories(): Int
+    suspend fun prepareAccountExport(): AccountExportPayload
+    suspend fun writeAccountExport(uri: Uri, payload: AccountExportPayload)
+    suspend fun deleteAccount()
 }
 
 class AndroidSubmissionWorkflowRepository(
@@ -138,6 +149,45 @@ class AndroidSubmissionWorkflowRepository(
             WorkflowSyncResult.RETRY -> throw IOException("执行回执已保存在设备上，等待网络恢复")
             WorkflowSyncResult.FAILURE -> throw IllegalStateException("执行回执无法同步")
         }
+    }
+
+    override suspend fun deleteSubmission(submissionId: String) {
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
+        val response = api.deleteSubmission(submissionId)
+        check(response.isSuccessful) { "删除提交失败（HTTP ${response.code()}）" }
+        scheduler.cancelSubmission(accountId, submissionId)
+        val local = dao.deleteSubmissionData(accountId, submissionId)
+        local.pendingReceiptIds.forEach { scheduler.cancelReceipt(accountId, it) }
+        local.localImagePath?.let(::File)?.delete()
+    }
+
+    override suspend fun clearMemories(): Int = api.clearMemories().cleared
+
+    override suspend fun prepareAccountExport(): AccountExportPayload {
+        val json = withContext(Dispatchers.IO) { api.exportAccount().use { it.string() } }
+        check(json.isNotBlank()) { "导出内容为空" }
+        return AccountExportPayload(
+            requestId = java.util.UUID.randomUUID().toString(),
+            fileName = "threadmind-export-${System.currentTimeMillis()}.json",
+            json = json,
+        )
+    }
+
+    override suspend fun writeAccountExport(uri: Uri, payload: AccountExportPayload) = withContext(Dispatchers.IO) {
+        val output = context.contentResolver.openOutputStream(uri)
+            ?: throw IOException("无法打开导出文件")
+        output.bufferedWriter(Charsets.UTF_8).use { it.write(payload.json) }
+    }
+
+    override suspend fun deleteAccount() {
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
+        val localImagePaths = dao.accountImagePaths(accountId)
+        val response = api.deleteAccount()
+        check(response.isSuccessful) { "删除账户失败（HTTP ${response.code()}）" }
+        scheduler.cancelAccount(accountId)
+        dao.clearAccount(accountId)
+        localImagePaths.forEach { File(it).delete() }
+        auth.signOut()
     }
 
     private suspend fun cache(response: ActionCardResponse) {

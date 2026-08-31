@@ -389,6 +389,13 @@ class AuthViewModel @Inject constructor(
         )
     }
 
+    fun accountDeleted() {
+        mutableState.value = AuthUiState(
+            isInitializing = false,
+            feedback = AuthFeedback("账户及云端数据已删除。", AuthFeedbackKind.SUCCESS),
+        )
+    }
+
     private fun validateNewPassword(snapshot: AuthUiState) = AuthFieldErrors(
         password = if (snapshot.password.length < MIN_PASSWORD_LENGTH) "密码至少需要八位。" else null,
         confirmPassword = when {
