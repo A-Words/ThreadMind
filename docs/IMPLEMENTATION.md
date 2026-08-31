@@ -18,13 +18,15 @@
 - Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录。
 - Android Auth：通过 supabase-kt 提供邮箱密码与六位 OTP 两种登录/注册方式；密码注册确认、找回密码和账户内设置密码都在 App 内验证邮件六位码，注册前强制确认隐私与数据处理说明，会话由 SDK 持久化和刷新。
 - Android API client：Retrofit/OkHttp/kotlinx.serialization 客户端从当前 Supabase Session 注入 Bearer Token，不接受账户 ID 头旁路。
+- Android Submission workflow：业务 repository 将待上传截图先复制到设备私有且不备份的目录，并使用按账户隔离的 Room 数据库保存 Submission、Action Card 缓存与待同步执行回执；WorkManager 在网络恢复后继续上传、轮询分析和同步回执。
+- Android 恢复与幂等保护：应用重启后恢复最近提交、审核卡片和未同步回执；Provider 已完成但回执未同步时禁止再次执行，执行终态与回执在本地一并持久化。
 - Android Memory Center：读取活动记忆，展示事实/推断、置信度、版本、敏感级别与来源；支持保留历史的修订和确认后删除。
 - Gradle Wrapper、服务端 Dockerfile、Node 和 Android 领域/API 自动化测试。
 
 ## 尚未接入
 
 - 可部署的独立 Worker 进程入口、生产视觉模型 adapter、LangGraph 提取流程及模型评测集。当前只有可替换模型接口、严格输出契约和已自动化验证的单任务处理器，尚不能表述为生产模型链路已接通。
-- Android 的业务 API repository、Room/WorkManager 离线恢复、重复联系人/会议冲突审核界面。
+- Android 的重复联系人/会议冲突审核界面。
 - 真实设备上的联系人/日历写入、权限撤销、账户删除和中国大陆网络验证。
 
 这些边界不应被当前的通过测试误写成已交付能力。
@@ -77,6 +79,7 @@ Supabase Hosted 项目的 Auth 配置必须满足：
 1. `server/migrations/0001_initial.sql` 创建私有 schema、约束、索引、GRANT、强制 RLS 与账户策略。
 2. `server/migrations/0002_create_runtime_role.sql` 创建无 `BYPASSRLS` 的登录角色并授予受限业务角色；密码由部署密钥管理器单独设置，不进入 migration 或 Git。
 3. `server/migrations/20260830174205_add_submissions_and_jobs.sql` 创建 Submission、Extraction、后台任务、Worker 角色/RLS、Submission 外键和私有 Storage bucket。
+4. `server/migrations/20260830181534_add_action_card_review_metadata.sql` 为 Action Card 增加字段级置信度与待处理校验问题，供低置信和歧义审核使用。
 
 截图上传还要求服务端环境配置 `SUPABASE_URL`、仅服务端可见的 `SUPABASE_SECRET_KEY`，以及可选的 `SUPABASE_STORAGE_BUCKET`。Android 仍只配置 publishable key；secret key 不得写入 `local.properties`、APK 或客户端日志。
 
