@@ -65,6 +65,9 @@ describe("Action Card invariants", () => {
     assert.equal(cancelled.receipt.status, "cancelled");
     assert.equal(cancelled.card.status, "failed");
     assert.equal(confirmCard(cancelled.card).status, "confirmed");
+    const userCancelled = recordExecution(confirmCard(readyCard()), { status: "cancelled", errorCode: "user_cancelled" }, []);
+    assert.equal(userCancelled.receipt.status, "cancelled");
+    assert.equal(userCancelled.card.status, "cancelled");
   });
 });
 

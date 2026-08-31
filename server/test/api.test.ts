@@ -69,6 +69,35 @@ describe("Action Card API", () => {
     await app.close();
   });
 
+  it("records an idempotent cancelled receipt when a confirmed card is cancelled", async () => {
+    const store = new InMemoryStore();
+    const app = buildApp(store, { allowInsecureAccountHeader: true });
+    const cardId = randomUUID();
+    const submissionId = randomUUID();
+    await app.inject({ method: "POST", url: "/v1/action-cards", headers: { "x-account-id": "a1" }, payload: {
+      cardId, submissionId, type: "create_contact", fields: { displayName: "Chen", contactMethod: "chen@example.com" },
+      targetAccountId: "local", evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 0.99 }],
+    }});
+    await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/confirm`, headers: { "x-account-id": "a1" }, payload: { expectedVersion: 1 } });
+
+    const hidden = await app.inject({ method: "DELETE", url: `/v1/action-cards/${cardId}`, headers: { "x-account-id": "a2" } });
+    assert.equal(hidden.statusCode, 404);
+    const cancelled = await app.inject({ method: "DELETE", url: `/v1/action-cards/${cardId}`, headers: { "x-account-id": "a1" } });
+    assert.equal(cancelled.statusCode, 204);
+    assert.equal(store.cards.get(cardId)?.status, "cancelled");
+    assert.equal(store.receipts.length, 1);
+    assert.equal(store.receipts[0]?.status, "cancelled");
+    assert.equal(store.receipts[0]?.errorCode, "user_cancelled");
+    assert.equal(store.receipts[0]?.targetRecordId, undefined);
+
+    const repeated = await app.inject({ method: "DELETE", url: `/v1/action-cards/${cardId}`, headers: { "x-account-id": "a1" } });
+    assert.equal(repeated.statusCode, 204);
+    assert.equal(store.receipts.length, 1);
+    const insights = await app.inject({ method: "GET", url: `/v1/insights?submissionId=${submissionId}`, headers: { "x-account-id": "a1" } });
+    assert.deepEqual(insights.json().items, []);
+    await app.close();
+  });
+
   it("rejects stale card edits instead of applying a retry twice", async () => {
     const app = buildApp(undefined, { allowInsecureAccountHeader: true });
     const cardId = randomUUID();

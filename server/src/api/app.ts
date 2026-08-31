@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 import { ZodError } from "zod";
@@ -180,6 +181,22 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     return edited ?? reply.code(404).send({ error: "not_found" });
   });
   app.delete<{ Params: { id: string } }>("/v1/action-cards/:id", async (request, reply) => {
+    const current = await actions.find(request.accountId, request.params.id);
+    if (!current) return reply.code(404).send({ error: "not_found" });
+    if (current.status === "executing" || current.status === "succeeded") {
+      throw new DomainError("card_not_cancellable", "Card can no longer be cancelled");
+    }
+    if (current.status === "cancelled") return reply.code(204).send();
+    if (current.confirmedSnapshot) {
+      const cancelled = await actions.recordExecution(
+        request.accountId,
+        current.id,
+        cancellationReceiptId(current.id, current.confirmedSnapshot.version),
+        { status: "cancelled", errorCode: "user_cancelled", errorMessage: "User cancelled before provider write" },
+      );
+      if (!cancelled) return reply.code(404).send({ error: "not_found" });
+      return reply.code(204).send();
+    }
     const cancelled = await actions.mutate(request.accountId, request.params.id, (card) => {
       if (card.status === "executing" || card.status === "succeeded") {
         throw new DomainError("card_not_cancellable", "Card can no longer be cancelled");
@@ -264,6 +281,11 @@ function publicSubmission(submission: import("../domain/model.ts").ScreenshotSub
 function publicExtraction(extraction: import("../domain/model.ts").ContextExtraction) {
   const { accountId: _accountId, ...visible } = extraction;
   return visible;
+}
+
+function cancellationReceiptId(cardId: string, version: number): string {
+  const hex = createHash("sha256").update(`${cardId}:cancel:${version}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function domainErrorStatus(code: string): number {

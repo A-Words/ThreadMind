@@ -100,5 +100,8 @@ export function recordExecution(
     completedAt: now.toISOString(),
   };
   invariant(receipt.status !== "succeeded" || receipt.targetRecordId, "target_missing", "Successful execution needs a target record id");
-  return { card: { ...card, status: result.status === "cancelled" ? "failed" : result.status }, receipt };
+  const nextStatus = result.status === "cancelled"
+    ? result.errorCode === "user_cancelled" ? "cancelled" : "failed"
+    : result.status;
+  return { card: { ...card, status: nextStatus }, receipt };
 }
