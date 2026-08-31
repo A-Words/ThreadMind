@@ -111,7 +111,9 @@ class AndroidProviderExecutor @Inject constructor(
         require(displayName.isNotBlank()) { "联系人姓名不能为空" }
         requireRecognizableContactMethod(method)
         val matches = contactMatches(method, displayName)
-            .mapNotNull { (contactId, matchedBy) -> loadCandidate(contactId, card.fields["accountName"] ?: card.targetAccountId, matchedBy, card.fields) }
+            .mapNotNull { (contactId, matchedBy) ->
+                loadCandidate(contactId, selectedAccountName(card), card.fields["accountType"], matchedBy, card.fields)
+            }
         return if (matches.isEmpty()) ProviderPreflightResult.Clear(card.id, card.version)
         else ProviderPreflightResult.ContactCandidates(card.id, card.version, matches, createContact = true)
     }
@@ -119,12 +121,14 @@ class AndroidProviderExecutor @Inject constructor(
     private fun inspectUpdateContact(card: ActionCard): ProviderPreflightResult {
         val targetId = card.fields["targetContactId"]
         val matches = if (!targetId.isNullOrBlank()) {
-            listOfNotNull(loadCandidate(targetId, card.fields["accountName"] ?: card.targetAccountId, "已选目标", emptyMap()))
+            listOfNotNull(loadCandidate(targetId, selectedAccountName(card), card.fields["accountType"], "已选目标", emptyMap()))
         } else {
             val query = card.fields["contactQuery"] ?: card.fields["displayName"] ?: card.fields["contactMethod"]
                 ?: return ProviderPreflightResult.Blocked(card.id, card.version, "更新联系人前必须提供联系人查询条件")
             contactMatches(card.fields["contactMethod"], query)
-                .mapNotNull { (contactId, matchedBy) -> loadCandidate(contactId, card.fields["accountName"] ?: card.targetAccountId, matchedBy, card.fields) }
+                .mapNotNull { (contactId, matchedBy) ->
+                    loadCandidate(contactId, selectedAccountName(card), card.fields["accountType"], matchedBy, card.fields)
+                }
         }
         if (matches.isEmpty()) return ProviderPreflightResult.Blocked(card.id, card.version, "没有找到可唯一更新的联系人")
         if (matches.size > 1 || targetId.isNullOrBlank()) {
@@ -348,12 +352,16 @@ class AndroidProviderExecutor @Inject constructor(
 
     private fun loadCandidate(
         contactId: String,
-        preferredAccount: String?,
+        preferredAccountName: String?,
+        preferredAccountType: String?,
         matchedBy: String,
         proposedFields: Map<String, String>,
     ): ContactCandidate? {
         val raw = rawContacts(contactId).let { rows ->
-            rows.firstOrNull { it.accountName == preferredAccount } ?: rows.firstOrNull()
+            rows.firstOrNull {
+                it.accountName == preferredAccountName &&
+                    (preferredAccountType.isNullOrBlank() || it.accountType == preferredAccountType)
+            } ?: rows.firstOrNull { it.accountName == preferredAccountName } ?: rows.firstOrNull()
         } ?: return null
         val displayName = resolver.query(
             ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId.toLong()),
@@ -476,6 +484,9 @@ class AndroidProviderExecutor @Inject constructor(
     private fun contactTargets(): List<ProviderTarget> {
         val accounts = linkedMapOf<Pair<String?, String?>, Unit>()
         accounts[null to null] = Unit
+        val writableAccountTypes = ContentResolver.getSyncAdapterTypes()
+            .filter { it.authority == ContactsContract.AUTHORITY && it.supportsUploading() }
+            .mapTo(mutableSetOf()) { it.accountType }
         resolver.query(
             ContactsContract.Settings.CONTENT_URI,
             arrayOf(ContactsContract.Settings.ACCOUNT_NAME, ContactsContract.Settings.ACCOUNT_TYPE),
@@ -494,7 +505,8 @@ class AndroidProviderExecutor @Inject constructor(
         )?.use { cursor ->
             while (cursor.moveToNext()) accounts[cursor.getString(0) to cursor.getString(1)] = Unit
         }
-        return accounts.keys.map { (accountName, accountType) ->
+        return accounts.keys.filter { (_, accountType) -> isWritableContactAccount(accountType, writableAccountTypes) }
+            .map { (accountName, accountType) ->
             ProviderTarget(
                 targetAccountId = accountName ?: "local",
                 label = if (accountName == null) "设备本地联系人" else "$accountName · ${accountType ?: "未知类型"}",
@@ -502,6 +514,10 @@ class AndroidProviderExecutor @Inject constructor(
             )
         }.sortedBy(ProviderTarget::label)
     }
+
+    private fun selectedAccountName(card: ActionCard): String? =
+        card.fields["accountName"]?.trim()?.takeIf(String::isNotEmpty)
+            ?: card.targetAccountId?.takeUnless { it == "local" }
 
     private companion object {
         val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
@@ -516,3 +532,6 @@ class AndroidProviderExecutor @Inject constructor(
         )
     }
 }
+
+internal fun isWritableContactAccount(accountType: String?, writableAccountTypes: Set<String>): Boolean =
+    accountType == null || accountType in writableAccountTypes
