@@ -237,6 +237,31 @@ private fun ThreadMindScreen(
                     TextButton(onClick = viewModel::refreshSubmission) { Text("刷新分析状态") }
                 }
             }
+            state.analysis?.let { analysis ->
+                item {
+                    Text("分析结果", style = MaterialTheme.typography.headlineSmall)
+                    Text("请核对转录、说话人和置信度；Action Card 的每条依据都来自这里。")
+                    if (analysis.messages.isEmpty()) Text("没有识别到可核对的消息文本。")
+                }
+                items(analysis.messages.sortedBy { it.order }, key = { "analysis:${it.id}" }) { message ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(message.speaker ?: "说话人不确定", style = MaterialTheme.typography.labelLarge)
+                            Text(message.text)
+                            Text(
+                                "置信度 ${(message.confidence * 100).toInt()}%${if (message.confidence < 0.8) " · 需要重点核对" else ""}",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
+                if (analysis.warnings.isNotEmpty()) {
+                    item {
+                        Text("分析警告", style = MaterialTheme.typography.titleMedium)
+                        analysis.warnings.forEach { warning -> Text("• $warning") }
+                    }
+                }
+            }
             item {
                 Text("数据管理", style = MaterialTheme.typography.headlineSmall)
                 Text("导出不包含原始截图；删除操作会清理云端结构化记录和设备内的 ThreadMind 缓存，不会删除已写入系统通讯录或日历的记录。")

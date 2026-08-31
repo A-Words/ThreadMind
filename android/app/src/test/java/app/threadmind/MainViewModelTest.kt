@@ -14,6 +14,8 @@ import app.threadmind.network.InsightBundleResponse
 import app.threadmind.network.InsightItemResponse
 import app.threadmind.network.InsightListResponse
 import app.threadmind.network.EvidenceRefResponse
+import app.threadmind.network.ExtractionResponse
+import app.threadmind.network.ExtractionMessageResponse
 import app.threadmind.network.ActionCardListResponse
 import app.threadmind.network.ActionCardEditRequest
 import app.threadmind.network.ActionCardResponse
@@ -132,6 +134,13 @@ class MainViewModelTest {
                 cards = listOf(restoredCard),
                 pendingReceipts = mapOf("card-1" to pendingReceipt),
                 providerReviewedVersions = setOf("card-1:1"),
+                analysis = ExtractionResponse(
+                    id = "extraction-1",
+                    submissionId = "submission-1",
+                    messages = listOf(ExtractionMessageResponse("m1", 0, "下周见", "对方", 0.72)),
+                    warnings = listOf("说话人置信度较低"),
+                    createdAt = "2026-09-01T00:00:00Z",
+                ),
             ),
         )
         val provider = FakeProviderExecutor()
@@ -143,6 +152,7 @@ class MainViewModelTest {
         assertEquals("submission-1", viewModel.state.value.submissionId)
         assertEquals(ActionStatus.CONFIRMED, viewModel.state.value.cards.single().status)
         assertEquals(pendingReceipt, viewModel.state.value.pendingReceipts["card-1"])
+        assertEquals("下周见", viewModel.state.value.analysis?.messages?.single()?.text)
         assertEquals("分析完成：1 张待审核卡片，云端原图已删除", viewModel.state.value.submissionMessage)
 
         viewModel.execute("card-1")
@@ -354,6 +364,7 @@ private class FakeThreadMindApi : ThreadMindApi {
 
     override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): SubmissionResponse = error("unused")
     override suspend fun getSubmission(id: String): SubmissionResponse = error("unused")
+    override suspend fun getExtraction(id: String): ExtractionResponse = error("unused")
     override suspend fun deleteSubmission(id: String): Response<Unit> = Response.success(Unit)
     override suspend fun listActionCards(id: String): ActionCardListResponse = error("unused")
     override suspend fun confirmActionCard(id: String, request: CardVersionRequest): ActionCardResponse = error("unused")

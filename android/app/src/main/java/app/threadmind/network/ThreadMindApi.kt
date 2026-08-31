@@ -104,6 +104,24 @@ data class SubmissionResponse(
 )
 
 @Serializable
+data class ExtractionMessageResponse(
+    val id: String,
+    val order: Int,
+    val text: String,
+    val speaker: String? = null,
+    val confidence: Double,
+)
+
+@Serializable
+data class ExtractionResponse(
+    val id: String,
+    val submissionId: String,
+    val messages: List<ExtractionMessageResponse>,
+    val warnings: List<String>,
+    val createdAt: String,
+)
+
+@Serializable
 data class ActionCardListResponse(val items: List<ActionCardResponse>)
 
 @Serializable
@@ -199,6 +217,9 @@ interface ThreadMindApi {
     @GET("v1/submissions/{id}")
     suspend fun getSubmission(@Path("id") id: String): SubmissionResponse
 
+    @GET("v1/submissions/{id}/extraction")
+    suspend fun getExtraction(@Path("id") id: String): ExtractionResponse
+
     @DELETE("v1/submissions/{id}")
     suspend fun deleteSubmission(@Path("id") id: String): RetrofitResponse<Unit>
 
@@ -254,6 +275,7 @@ class UnavailableThreadMindApi(
 ) : ThreadMindApi {
     override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): Nothing = error(reason)
     override suspend fun getSubmission(id: String): Nothing = error(reason)
+    override suspend fun getExtraction(id: String): Nothing = error(reason)
     override suspend fun deleteSubmission(id: String): Nothing = error(reason)
     override suspend fun listActionCards(id: String): Nothing = error(reason)
     override suspend fun confirmActionCard(id: String, request: CardVersionRequest): Nothing = error(reason)

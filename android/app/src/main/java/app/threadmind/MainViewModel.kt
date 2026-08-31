@@ -17,6 +17,7 @@ import app.threadmind.network.MemoryRevisionRequest
 import app.threadmind.network.ActionReceiptRequest
 import app.threadmind.network.AccountExportPayload
 import app.threadmind.network.InsightBundleResponse
+import app.threadmind.network.ExtractionResponse
 import app.threadmind.network.SubmissionProgress
 import app.threadmind.network.SubmissionWorkflowRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -43,6 +44,7 @@ data class MainUiState(
     val isSubmissionPending: Boolean = false,
     val submissionMessage: String? = null,
     val cards: List<ActionCard> = emptyList(),
+    val analysis: ExtractionResponse? = null,
     val pendingCardIds: Set<String> = emptySet(),
     val pendingReceipts: Map<String, ActionReceiptRequest> = emptyMap(),
     val providerReviewedVersions: Set<String> = emptySet(),
@@ -118,6 +120,7 @@ class MainViewModel @Inject constructor(
                 isSubmissionPending = false,
                 submissionMessage = null,
                 cards = emptyList(),
+                analysis = null,
                 providerReviewedVersions = emptySet(),
                 providerReview = null,
                 providerTargetSelection = null,
@@ -140,6 +143,7 @@ class MainViewModel @Inject constructor(
                 isSubmissionPending = true,
                 submissionMessage = "正在加密上传截图…",
                 cards = emptyList(),
+                analysis = null,
             )
         }
         submissionJob = viewModelScope.launch {
@@ -190,6 +194,7 @@ class MainViewModel @Inject constructor(
             isSubmissionPending = progress.status !in setOf("ready", "failed"),
             submissionMessage = progressMessage(progress),
             cards = if (progress.status == "ready") progress.cards else current.cards,
+            analysis = if (progress.status == "ready") progress.analysis else current.analysis,
             pendingReceipts = progress.pendingReceipts,
             providerReviewedVersions = progress.providerReviewedVersions,
         )
@@ -221,6 +226,7 @@ class MainViewModel @Inject constructor(
                             submissionStatus = restored?.status,
                             isSubmissionPending = restored != null && restored.status !in setOf("ready", "failed"),
                             cards = restored?.cards.orEmpty(),
+                            analysis = restored?.analysis,
                             pendingReceipts = restored?.pendingReceipts.orEmpty(),
                             providerReviewedVersions = restored?.providerReviewedVersions.orEmpty(),
                             providerReview = null,
@@ -381,6 +387,7 @@ class MainViewModel @Inject constructor(
                         isSubmissionPending = false,
                         submissionMessage = null,
                         cards = emptyList(),
+                        analysis = null,
                         pendingCardIds = emptySet(),
                         pendingReceipts = emptyMap(),
                         providerReviewedVersions = emptySet(),

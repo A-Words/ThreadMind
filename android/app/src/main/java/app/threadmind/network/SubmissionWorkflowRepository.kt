@@ -25,6 +25,7 @@ data class SubmissionProgress(
     val failureCode: String? = null,
     val pendingReceipts: Map<String, ActionReceiptRequest> = emptyMap(),
     val providerReviewedVersions: Set<String> = emptySet(),
+    val analysis: ExtractionResponse? = null,
 )
 
 data class AccountExportPayload(
@@ -246,7 +247,8 @@ class AndroidSubmissionWorkflowRepository(
         val reviewed = dao.cards(accountId, submissionId)
             .filter { it.providerReviewedVersion == it.version }
             .mapTo(mutableSetOf()) { "${it.id}:${it.version}" }
-        return SubmissionProgress(submissionId, submission.status, cards, submission.failureCode, receipts, reviewed)
+        val analysis = submission.extractionJson?.let { WorkflowSyncEngine.json.decodeFromString<ExtractionResponse>(it) }
+        return SubmissionProgress(submissionId, submission.status, cards, submission.failureCode, receipts, reviewed, analysis)
     }
 
     private fun persistUpload(submissionId: String, upload: ImageUpload): File {

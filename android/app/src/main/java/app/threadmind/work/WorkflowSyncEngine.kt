@@ -57,6 +57,13 @@ class WorkflowSyncEngine @Inject constructor(
             if (uploadedFromDevice) File(local.localImagePath).delete()
             when (remote.status) {
                 "ready" -> {
+                    val extraction = api.getExtraction(submissionId)
+                    dao.updateSubmissionExtraction(
+                        accountId,
+                        submissionId,
+                        json.encodeToString(extraction),
+                        System.currentTimeMillis(),
+                    )
                     cacheCards(accountId, submissionId, api.listActionCards(submissionId).items)
                     WorkflowSyncResult.SUCCESS
                 }

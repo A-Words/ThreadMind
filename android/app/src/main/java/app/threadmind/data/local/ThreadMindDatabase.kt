@@ -24,6 +24,7 @@ data class PendingSubmissionEntity(
     val supplementalText: String,
     val status: String,
     val failureCode: String? = null,
+    val extractionJson: String? = null,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
 )
@@ -79,6 +80,9 @@ interface WorkflowDao {
 
     @Query("update pending_submissions set status = :status, failureCode = :failureCode, updatedAtEpochMillis = :updatedAt where accountId = :accountId and id = :submissionId")
     suspend fun updateSubmissionStatus(accountId: String, submissionId: String, status: String, failureCode: String?, updatedAt: Long)
+
+    @Query("update pending_submissions set extractionJson = :extractionJson, updatedAtEpochMillis = :updatedAt where accountId = :accountId and id = :submissionId")
+    suspend fun updateSubmissionExtraction(accountId: String, submissionId: String, extractionJson: String, updatedAt: Long)
 
     @Query("delete from pending_submissions where accountId = :accountId and id = :submissionId")
     suspend fun deleteSubmission(accountId: String, submissionId: String)
@@ -166,7 +170,7 @@ interface WorkflowDao {
 
 @Database(
     entities = [PendingSubmissionEntity::class, ActionCardCacheEntity::class, PendingReceiptEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class ThreadMindDatabase : RoomDatabase() {
