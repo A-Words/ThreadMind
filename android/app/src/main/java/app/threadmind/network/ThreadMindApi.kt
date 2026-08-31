@@ -27,6 +27,7 @@ import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
+import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 
@@ -43,6 +44,7 @@ data class MemoryRecordResponse(
     val confidence: Double,
     val sensitivity: String,
     val sourceRefs: List<String>,
+    val sourceEvidence: List<EvidenceRefResponse> = emptyList(),
     val createdAt: String,
     val updatedAt: String,
     val version: Int,
@@ -182,7 +184,13 @@ interface ThreadMindApi {
     suspend fun createActionReceipt(@Path("id") id: String, @Body request: ActionReceiptRequest)
 
     @GET("v1/memories")
-    suspend fun listMemories(): MemoryListResponse
+    suspend fun listMemories(
+        @Query("q") search: String? = null,
+        @Query("subjectRef") subjectRef: String? = null,
+        @Query("type") type: String? = null,
+        @Query("from") createdFrom: String? = null,
+        @Query("to") createdTo: String? = null,
+    ): MemoryListResponse
 
     @PATCH("v1/memories/{id}")
     suspend fun reviseMemory(
@@ -204,7 +212,7 @@ class UnavailableThreadMindApi(
     override suspend fun editActionCard(id: String, request: ActionCardEditRequest): Nothing = error(reason)
     override suspend fun cancelActionCard(id: String): Nothing = error(reason)
     override suspend fun createActionReceipt(id: String, request: ActionReceiptRequest): Nothing = error(reason)
-    override suspend fun listMemories(): Nothing = error(reason)
+    override suspend fun listMemories(search: String?, subjectRef: String?, type: String?, createdFrom: String?, createdTo: String?): Nothing = error(reason)
     override suspend fun reviseMemory(id: String, request: MemoryRevisionRequest): Nothing = error(reason)
     override suspend fun deleteMemory(id: String): Nothing = error(reason)
 }

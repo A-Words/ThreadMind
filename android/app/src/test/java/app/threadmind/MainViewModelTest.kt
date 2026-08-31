@@ -140,6 +140,24 @@ class MainViewModelTest {
         assertEquals(null, viewModel.state.value.submissionId)
         assertEquals(emptyMap<String, ActionReceiptRequest>(), viewModel.state.value.pendingReceipts)
     }
+
+    @Test fun `memory filters are sent to the server`() = runTest(dispatcher) {
+        val api = FakeThreadMindApi()
+        val viewModel = MainViewModel(FakeProviderExecutor(), api, FakeSubmissionWorkflowRepository())
+        viewModel.setMemorySearch("  chen  ")
+        viewModel.setMemorySubjectRef("contact-1")
+        viewModel.setMemoryType("profile")
+        viewModel.setMemoryTimeFilter(MemoryTimeFilter.LAST_30_DAYS)
+
+        viewModel.refreshMemories()
+        runCurrent()
+
+        assertEquals("chen", api.lastMemorySearch)
+        assertEquals("contact-1", api.lastMemorySubjectRef)
+        assertEquals("profile", api.lastMemoryType)
+        assertEquals(true, api.lastMemoryCreatedFrom?.isNotBlank())
+        assertEquals("找到 1 条活动记忆", viewModel.state.value.memoryMessage)
+    }
 }
 
 private class FakeSubmissionWorkflowRepository(
@@ -173,8 +191,24 @@ private fun actionCard() = ActionCard(
 
 private class FakeThreadMindApi : ThreadMindApi {
     private var memory: MemoryRecordResponse? = memoryRecord()
+    var lastMemorySearch: String? = null
+    var lastMemorySubjectRef: String? = null
+    var lastMemoryType: String? = null
+    var lastMemoryCreatedFrom: String? = null
 
-    override suspend fun listMemories() = MemoryListResponse(listOfNotNull(memory))
+    override suspend fun listMemories(
+        search: String?,
+        subjectRef: String?,
+        type: String?,
+        createdFrom: String?,
+        createdTo: String?,
+    ): MemoryListResponse {
+        lastMemorySearch = search
+        lastMemorySubjectRef = subjectRef
+        lastMemoryType = type
+        lastMemoryCreatedFrom = createdFrom
+        return MemoryListResponse(listOfNotNull(memory))
+    }
 
     override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): SubmissionResponse = error("unused")
     override suspend fun getSubmission(id: String): SubmissionResponse = error("unused")

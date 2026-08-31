@@ -26,6 +26,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -140,6 +142,8 @@ private fun ThreadMindScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingCardId by remember { mutableStateOf<String?>(null) }
     var memoryToDelete by remember { mutableStateOf<MemoryRecordResponse?>(null) }
+    var memoryTypeMenuExpanded by remember { mutableStateOf(false) }
+    var memoryTimeMenuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { viewModel.checkBackend() }
     LaunchedEffect(authFeedback) {
         val feedback = authFeedback ?: return@LaunchedEffect
@@ -213,12 +217,64 @@ private fun ThreadMindScreen(
                 ) {
                     Text("记忆中心", style = MaterialTheme.typography.headlineSmall)
                     TextButton(
-                        onClick = viewModel::checkBackend,
-                        enabled = state.backendStatus != BackendStatus.CHECKING,
+                        onClick = viewModel::refreshMemories,
+                        enabled = !state.isMemoryLoading,
                     ) { Text("刷新") }
                 }
                 Text("你可以核对、修订或删除系统保存的记忆。修订会保留来源和历史版本。")
-                if (state.backendStatus == BackendStatus.CHECKING) CircularProgressIndicator()
+                OutlinedTextField(
+                    value = state.memorySearch,
+                    onValueChange = viewModel::setMemorySearch,
+                    label = { Text("搜索记忆与来源摘录") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = state.memorySubjectRef,
+                    onValueChange = viewModel::setMemorySubjectRef,
+                    label = { Text("联系人标识（可选）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box {
+                        TextButton(onClick = { memoryTypeMenuExpanded = true }) {
+                            Text(MEMORY_TYPES.first { it.first == state.memoryType }.second)
+                        }
+                        DropdownMenu(expanded = memoryTypeMenuExpanded, onDismissRequest = { memoryTypeMenuExpanded = false }) {
+                            MEMORY_TYPES.forEach { (value, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        viewModel.setMemoryType(value)
+                                        memoryTypeMenuExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    Box {
+                        TextButton(onClick = { memoryTimeMenuExpanded = true }) {
+                            Text(state.memoryTimeFilter.label)
+                        }
+                        DropdownMenu(expanded = memoryTimeMenuExpanded, onDismissRequest = { memoryTimeMenuExpanded = false }) {
+                            MemoryTimeFilter.entries.forEach { value ->
+                                DropdownMenuItem(
+                                    text = { Text(value.label) },
+                                    onClick = {
+                                        viewModel.setMemoryTimeFilter(value)
+                                        memoryTimeMenuExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = viewModel::refreshMemories, enabled = !state.isMemoryLoading) { Text("应用筛选") }
+                    TextButton(onClick = viewModel::clearMemoryFilters, enabled = !state.isMemoryLoading) { Text("清除") }
+                }
+                if (state.backendStatus == BackendStatus.CHECKING || state.isMemoryLoading) CircularProgressIndicator()
                 if (state.backendStatus == BackendStatus.CONNECTED && state.memories.isEmpty()) {
                     Text("还没有活动记忆。")
                 }
@@ -374,7 +430,14 @@ private fun MemoryCard(
                 modifier = Modifier.fillMaxWidth(),
             )
             Text("置信度 ${(memory.confidence * 100).toInt()}% · 第 ${memory.version} 版 · ${memory.sensitivity}")
-            Text("来源：${memory.sourceRefs.joinToString().ifBlank { "无" }}")
+            Text("创建时间：${memory.createdAt}")
+            if (memory.sourceEvidence.isEmpty()) {
+                Text("来源：${memory.sourceRefs.joinToString().ifBlank { "无" }}")
+            } else {
+                memory.sourceEvidence.forEach { evidence ->
+                    Text("来源摘录：${evidence.excerpt} (${(evidence.confidence * 100).toInt()}%)")
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { onSave(assertion) },
@@ -385,3 +448,20 @@ private fun MemoryCard(
         }
     }
 }
+
+private val MEMORY_TYPES = listOf(
+    null to "全部类型",
+    "event" to "事件",
+    "preference" to "偏好",
+    "relationship" to "关系",
+    "commitment" to "承诺",
+    "profile" to "资料",
+    "other" to "其他",
+)
+
+private val MemoryTimeFilter.label: String
+    get() = when (this) {
+        MemoryTimeFilter.ALL -> "全部时间"
+        MemoryTimeFilter.LAST_30_DAYS -> "近 30 天"
+        MemoryTimeFilter.LAST_YEAR -> "近一年"
+    }

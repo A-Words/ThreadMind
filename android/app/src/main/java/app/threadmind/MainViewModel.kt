@@ -23,6 +23,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import java.util.UUID
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+
+enum class MemoryTimeFilter { ALL, LAST_30_DAYS, LAST_YEAR }
 
 data class MainUiState(
     val selectedImage: Uri? = null,
@@ -41,6 +45,11 @@ data class MainUiState(
     val memories: List<MemoryRecordResponse> = emptyList(),
     val pendingMemoryIds: Set<String> = emptySet(),
     val memoryMessage: String? = null,
+    val memorySearch: String = "",
+    val memorySubjectRef: String = "",
+    val memoryType: String? = null,
+    val memoryTimeFilter: MemoryTimeFilter = MemoryTimeFilter.ALL,
+    val isMemoryLoading: Boolean = false,
 )
 
 enum class BackendStatus { IDLE, CHECKING, CONNECTED, FAILED }
@@ -70,6 +79,10 @@ class MainViewModel @Inject constructor(
     fun clearSelectedImage() = selectImage(null, "in_app")
     fun setSupplementalText(value: String) = mutableState.update { it.copy(supplementalText = value) }
     fun showCards(cards: List<ActionCard>) = mutableState.update { it.copy(cards = cards) }
+    fun setMemorySearch(value: String) = mutableState.update { it.copy(memorySearch = value) }
+    fun setMemorySubjectRef(value: String) = mutableState.update { it.copy(memorySubjectRef = value) }
+    fun setMemoryType(value: String?) = mutableState.update { it.copy(memoryType = value) }
+    fun setMemoryTimeFilter(value: MemoryTimeFilter) = mutableState.update { it.copy(memoryTimeFilter = value) }
 
     private fun selectImage(uri: Uri?, source: String) {
         submissionJob?.cancel()
@@ -163,11 +176,12 @@ class MainViewModel @Inject constructor(
     }
 
     fun checkBackend() {
+        val filters = state.value
         viewModelScope.launch {
             mutableState.update {
                 it.copy(backendStatus = BackendStatus.CHECKING, backendMessage = "正在验证服务端身份…")
             }
-            runCatching { api.listMemories() to submissions.restoreLatest() }
+            runCatching { listMemories(filters) to submissions.restoreLatest() }
                 .onSuccess { (response, restored) ->
                     mutableState.update {
                         it.copy(
@@ -194,6 +208,54 @@ class MainViewModel @Inject constructor(
                 }
         }
     }
+
+    fun refreshMemories() {
+        val filters = state.value
+        viewModelScope.launch {
+            mutableState.update { it.copy(isMemoryLoading = true, memoryMessage = null) }
+            runCatching { listMemories(filters) }
+                .onSuccess { response ->
+                    mutableState.update {
+                        it.copy(
+                            memories = response.items,
+                            isMemoryLoading = false,
+                            memoryMessage = "找到 ${response.items.size} 条活动记忆",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            isMemoryLoading = false,
+                            memoryMessage = error.message?.takeIf(String::isNotBlank) ?: "记忆检索失败",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun clearMemoryFilters() {
+        mutableState.update {
+            it.copy(
+                memorySearch = "",
+                memorySubjectRef = "",
+                memoryType = null,
+                memoryTimeFilter = MemoryTimeFilter.ALL,
+            )
+        }
+        refreshMemories()
+    }
+
+    private suspend fun listMemories(filters: MainUiState) = api.listMemories(
+        search = filters.memorySearch.trim().takeIf(String::isNotEmpty),
+        subjectRef = filters.memorySubjectRef.trim().takeIf(String::isNotEmpty),
+        type = filters.memoryType,
+        createdFrom = when (filters.memoryTimeFilter) {
+            MemoryTimeFilter.ALL -> null
+            MemoryTimeFilter.LAST_30_DAYS -> Instant.now().minus(30, ChronoUnit.DAYS).toString()
+            MemoryTimeFilter.LAST_YEAR -> Instant.now().minus(365, ChronoUnit.DAYS).toString()
+        },
+    )
 
     fun reviseMemory(id: String, assertion: String) {
         if (assertion.isBlank()) {
