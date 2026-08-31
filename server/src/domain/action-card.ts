@@ -18,8 +18,11 @@ export function evaluateCard(card: ActionCard): ActionCard {
     ...card.validationIssues.map((issue) => `validation:${issue}`),
     ...missing.map((field) => `missing:${field}`),
   ];
-  if (card.evidence.length === 0) blockers.push("missing:evidence");
-  if (!card.targetAccountId) blockers.push("missing:targetAccountId");
+  if (card.evidence.length === 0 || card.evidence.some((item) =>
+    !item.sourceId.trim() || !item.excerpt.trim() || item.confidence < 0 || item.confidence > 1)) {
+    blockers.push("missing:evidence");
+  }
+  if (!card.targetAccountId?.trim()) blockers.push("missing:targetAccountId");
   return { ...card, blockers, status: blockers.length === 0 ? "ready" : "blocked" };
 }
 
@@ -99,7 +102,7 @@ export function recordExecution(
     startedAt,
     completedAt: now.toISOString(),
   };
-  invariant(receipt.status !== "succeeded" || receipt.targetRecordId, "target_missing", "Successful execution needs a target record id");
+  invariant(receipt.status !== "succeeded" || receipt.targetRecordId?.trim(), "target_missing", "Successful execution needs a target record id");
   const nextStatus = result.status === "cancelled"
     ? result.errorCode === "user_cancelled" ? "cancelled" : "failed"
     : result.status;

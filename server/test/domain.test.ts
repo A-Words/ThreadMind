@@ -19,6 +19,8 @@ describe("Action Card invariants", () => {
     const card = evaluateCard({ ...readyCard(), fields: {} });
     assert.equal(card.status, "blocked");
     assert.throws(() => confirmCard(card), { code: "card_not_ready" });
+    assert.equal(evaluateCard({ ...readyCard(), targetAccountId: "   " }).status, "blocked");
+    assert.equal(evaluateCard({ ...readyCard(), evidence: [{ sourceId: "submission-1", excerpt: "   ", confidence: 1 }] }).status, "blocked");
   });
 
   it("uses the visible target account as the single contact-account requirement", () => {
@@ -86,6 +88,7 @@ describe("Memory and insight invariants", () => {
     assert.equal(corrected.epistemicStatus, "fact");
     assert.equal(corrected.supersedesId, first.id);
     assert.equal(corrected.sourceEvidence.at(-1)?.excerpt, "Works at B");
+    assert.throws(() => reviseMemory(corrected, "   ", "correction-2"), { code: "memory_assertion_required" });
   });
 
   it("requires successful action receipts and evidence for formal insights", () => {

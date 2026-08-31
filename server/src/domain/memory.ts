@@ -6,7 +6,8 @@ export function createMemory(
   input: Omit<MemoryRecord, "id" | "createdAt" | "updatedAt" | "version" | "status"> & { id?: string },
   now = new Date(),
 ): MemoryRecord {
-  invariant(input.sourceRefs.length > 0, "memory_source_required", "Memory must have a traceable source");
+  invariant(input.assertion.trim().length > 0, "memory_assertion_required", "Memory must have a non-empty assertion");
+  invariant(input.sourceRefs.length > 0 && input.sourceRefs.every((source) => source.trim().length > 0), "memory_source_required", "Memory must have a traceable source");
   invariant(input.sourceEvidence.length > 0, "memory_evidence_required", "Memory must have displayable source evidence");
   invariant(
     input.sourceEvidence.every((evidence) => input.sourceRefs.includes(evidence.sourceId) && evidence.excerpt.trim().length > 0),
@@ -20,6 +21,8 @@ export function createMemory(
 }
 export function reviseMemory(current: MemoryRecord, assertion: string, sourceRef: string, now = new Date()): [MemoryRecord, MemoryRecord] {
   invariant(current.status === "active", "memory_not_active", "Only active memory can be revised");
+  invariant(assertion.trim().length > 0, "memory_assertion_required", "Memory must have a non-empty assertion");
+  invariant(sourceRef.trim().length > 0, "memory_source_required", "Memory correction must have a traceable source");
   const timestamp = now.toISOString();
   const oldVersion: MemoryRecord = { ...current, status: "superseded", updatedAt: timestamp };
   const newVersion: MemoryRecord = {
