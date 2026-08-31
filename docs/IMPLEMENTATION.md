@@ -1,15 +1,15 @@
 # ThreadMind 实现说明
 
-当前实现是 MVP 的第一条可运行纵向切片，目标是先把不可破坏的授权、证据、账户隔离与删除语义编码，而不是提前接入未经评测的生产模型。
+当前实现已覆盖 MVP 的主要本地与服务端交互面，并把授权、证据、账户隔离、可恢复执行与删除语义编码。生产视觉模型与独立 Worker 部署仍未完成，因此不能把当前规则生成器描述成生产 AI 链路。
 
 ## 已实现
 
 - `server/`：Node.js 24 + TypeScript + Fastify 模块化服务端。
 - Action Card：字段/evidence 校验、阻塞状态、编辑增版、逐版本确认、不可变确认快照、独立执行回执与账户隔离。
-- Memory：来源强制、事实/推断标记、用户修正版本化、删除与默认召回过滤。
-- Insight：正式洞察必须存在同账户成功回执，并且每个 item 都有依据。
+- Memory：来源强制、事实/推断标记、用户修正版本化、可读来源摘录、关键词/联系人/类型/时间检索、删除后正文抹除与默认召回过滤。
+- Insight：正式洞察必须存在同账户成功回执，每个 item 都有依据；按稳定生成键幂等持久化并提供账户隔离的历史查询。当前默认 generator 是保守的证据规则实现，不是生产模型。
 - Auth：生产入口通过 Supabase JWKS 验证 Bearer Token；不提供生产可用的账户头旁路。
-- PostgreSQL：Supabase 托管实例、显式 SQL migration、强制 RLS、最小权限运行角色，以及 Kysely Action Card、Action Receipt 与 Memory repositories。
+- PostgreSQL：Supabase 托管实例、显式 SQL migration、强制 RLS、最小权限运行角色，以及 Kysely Submission、Action、Memory、Insight 与账户导出 repositories。
 - Action API：卡片创建使用客户端稳定 UUID，编辑使用期望版本阻止重复应用，确认可安全重试，执行回执使用稳定 UUID 在提交结果不确定时返回原记录。
 - Screenshot Submission API：接收单张 PNG/JPEG/WebP multipart 图片，限制 15 MiB，校验文件签名并计算 SHA-256；相同提交 UUID 和内容可安全重试，API 响应不暴露 Storage 路径或指纹。
 - 临时图片与任务：服务端使用 Supabase secret key 写入私有 `threadmind-submissions` bucket；Submission 元数据和 `analyze_submission` 任务在同一账户事务落库，队列 payload 不保存截图或正文。
@@ -21,13 +21,16 @@
 - Android Submission workflow：业务 repository 将待上传截图先复制到设备私有且不备份的目录，并使用按账户隔离的 Room 数据库保存 Submission、Action Card 缓存与待同步执行回执；WorkManager 在网络恢复后继续上传、轮询分析和同步回执。
 - Android 恢复与幂等保护：应用重启后恢复最近提交、审核卡片和未同步回执；Provider 已完成但回执未同步时禁止再次执行，执行终态与回执在本地一并持久化。
 - Android Memory Center：读取活动记忆，展示事实/推断、置信度、版本、敏感级别与来源；支持保留历史的修订和确认后删除。
+- Android Insight History：展示执行后洞察、事实/推断、置信度、来源摘录与建议，不把洞察历史反向写入 Memory。
+- 数据控制：服务端提供版本化账户 JSON 导出、幂等单次提交删除、全量记忆清除和 Auth Admin 账户硬删除；Android 通过系统文档选择器导出，并在确认后同步清除 Room、WorkManager 与本地会话。已由用户确认写入系统 Provider 的记录不被后台删除。
 - Gradle Wrapper、服务端 Dockerfile、Node 和 Android 领域/API 自动化测试。
 
 ## 尚未接入
 
 - 可部署的独立 Worker 进程入口、生产视觉模型 adapter、LangGraph 提取流程及模型评测集。当前只有可替换模型接口、严格输出契约和已自动化验证的单任务处理器，尚不能表述为生产模型链路已接通。
 - Android 的重复联系人/会议冲突审核界面。
-- 真实设备上的联系人/日历写入、权限撤销、账户删除和中国大陆网络验证。
+- 真实设备上的联系人/日历写入、权限撤销、账户删除、导出文件回读和中国大陆网络验证。
+- 新增的 Memory 来源证据与 Insight 生成键迁移尚未应用到 Hosted 项目，远端集成测试会在迁移前因缺列失败；应用 migration 属于外部数据库变更，需要明确部署授权。
 
 这些边界不应被当前的通过测试误写成已交付能力。
 
@@ -80,8 +83,10 @@ Supabase Hosted 项目的 Auth 配置必须满足：
 2. `server/migrations/0002_create_runtime_role.sql` 创建无 `BYPASSRLS` 的登录角色并授予受限业务角色；密码由部署密钥管理器单独设置，不进入 migration 或 Git。
 3. `server/migrations/20260830174205_add_submissions_and_jobs.sql` 创建 Submission、Extraction、后台任务、Worker 角色/RLS、Submission 外键和私有 Storage bucket。
 4. `server/migrations/20260830181534_add_action_card_review_metadata.sql` 为 Action Card 增加字段级置信度与待处理校验问题，供低置信和歧义审核使用。
+5. `server/migrations/20260831070229_add_memory_source_evidence.sql` 为 Memory 增加可展示、可检索且随删除抹除的来源证据。
+6. `server/migrations/20260831073538_add_insight_generation_key.sql` 为 Insight 增加幂等生成键、Submission 级联外键与历史索引。
 
-截图上传还要求服务端环境配置 `SUPABASE_URL`、仅服务端可见的 `SUPABASE_SECRET_KEY`，以及可选的 `SUPABASE_STORAGE_BUCKET`。Android 仍只配置 publishable key；secret key 不得写入 `local.properties`、APK 或客户端日志。
+截图上传和账户硬删除还要求服务端环境配置 `SUPABASE_URL`、仅服务端可见的 `SUPABASE_SECRET_KEY`，以及可选的 `SUPABASE_STORAGE_BUCKET`。Android 仍只配置 publishable key；secret key 不得写入 `local.properties`、APK 或客户端日志。
 
 每个 repository 操作都在短事务内执行 `SET LOCAL ROLE threadmind_api`，再用 JWT `sub` 写入 transaction-local `app.current_account_id`。RLS policy 从该设置读取账户，事务结束后上下文自动清除。Memory 创建、修订和删除，以及 Action Card 创建、确认和回执写入都具有可恢复语义；非幂等的卡片编辑使用 `expectedVersion` 拒绝重复应用。详细决策见 [ADR-0002](adrs/0002-postgresql-rls-context.md)。
 
