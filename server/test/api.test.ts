@@ -98,6 +98,33 @@ describe("Action Card API", () => {
     await app.close();
   });
 
+  it("turns a duplicate create-contact card into a new update-contact version", async () => {
+    const app = buildApp(undefined, { allowInsecureAccountHeader: true });
+    const cardId = randomUUID();
+    const submissionId = randomUUID();
+    const created = await app.inject({ method: "POST", url: "/v1/action-cards", headers: { "x-account-id": "a1" }, payload: {
+      cardId, submissionId, type: "create_contact",
+      fields: { displayName: "Chen", contactMethod: "chen@example.com", targetContactAccountId: "local" },
+      targetAccountId: "local", evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 0.99 }],
+    }});
+    assert.equal(created.statusCode, 201);
+    const converted = await app.inject({ method: "PATCH", url: `/v1/action-cards/${cardId}`, headers: { "x-account-id": "a1" }, payload: {
+      expectedVersion: 1,
+      type: "update_contact",
+      fields: {
+        targetContactId: "42",
+        changes: JSON.stringify([{ field: "email", dataId: null, oldValue: null, newValue: "chen@example.com" }]),
+      },
+      targetAccountId: "local",
+    }});
+    assert.equal(converted.statusCode, 200);
+    assert.equal(converted.json().type, "update_contact");
+    assert.equal(converted.json().version, 2);
+    assert.equal(converted.json().status, "ready");
+    assert.equal(converted.json().confirmedSnapshot, undefined);
+    await app.close();
+  });
+
   it("makes memory visible, correctable, deletable and account scoped", async () => {
     const store = new InMemoryStore();
     const app = buildApp(store, { allowInsecureAccountHeader: true });

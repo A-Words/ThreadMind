@@ -36,7 +36,14 @@ interface SubmissionWorkflowRepository {
     suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String): SubmissionProgress
     suspend fun refresh(submissionId: String): SubmissionProgress
     suspend fun restoreLatest(): SubmissionProgress?
-    suspend fun edit(cardId: String, expectedVersion: Int, fields: Map<String, String>, targetAccountId: String, resolvedValidationIssues: List<String>): ActionCard
+    suspend fun edit(
+        cardId: String,
+        expectedVersion: Int,
+        fields: Map<String, String>,
+        targetAccountId: String,
+        resolvedValidationIssues: List<String>,
+        type: app.threadmind.domain.ActionType? = null,
+    ): ActionCard
     suspend fun confirm(cardId: String, expectedVersion: Int): ActionCard
     suspend fun cancel(cardId: String)
     suspend fun reportExecution(cardId: String, request: ActionReceiptRequest)
@@ -111,8 +118,18 @@ class AndroidSubmissionWorkflowRepository(
         fields: Map<String, String>,
         targetAccountId: String,
         resolvedValidationIssues: List<String>,
+        type: app.threadmind.domain.ActionType?,
     ): ActionCard {
-        val response = api.editActionCard(cardId, ActionCardEditRequest(expectedVersion, fields, targetAccountId, resolvedValidationIssues))
+        val response = api.editActionCard(
+            cardId,
+            ActionCardEditRequest(
+                expectedVersion = expectedVersion,
+                type = type?.name?.lowercase(),
+                fields = fields,
+                targetAccountId = targetAccountId,
+                resolvedValidationIssues = resolvedValidationIssues,
+            ),
+        )
         cache(response)
         return response.toDomain()
     }

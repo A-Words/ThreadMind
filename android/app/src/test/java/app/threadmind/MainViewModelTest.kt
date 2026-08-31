@@ -209,8 +209,15 @@ private class FakeSubmissionWorkflowRepository(
     override suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String) = error("unused")
     override suspend fun refresh(submissionId: String): SubmissionProgress = error("unused")
     override suspend fun restoreLatest(): SubmissionProgress? = restored
-    override suspend fun edit(cardId: String, expectedVersion: Int, fields: Map<String, String>, targetAccountId: String, resolvedValidationIssues: List<String>) =
-        ActionCardPolicy.edit(actionCard().copy(version = expectedVersion), fields, resolvedValidationIssues.toSet()).copy(targetAccountId = targetAccountId)
+    override suspend fun edit(
+        cardId: String,
+        expectedVersion: Int,
+        fields: Map<String, String>,
+        targetAccountId: String,
+        resolvedValidationIssues: List<String>,
+        type: ActionType?,
+    ) = ActionCardPolicy.edit(actionCard().copy(version = expectedVersion), fields, resolvedValidationIssues.toSet())
+        .copy(targetAccountId = targetAccountId, type = type ?: actionCard().type)
     override suspend fun confirm(cardId: String, expectedVersion: Int) = ActionCardPolicy.confirm(actionCard().copy(version = expectedVersion))
     override suspend fun cancel(cardId: String) = Unit
     override suspend fun reportExecution(cardId: String, request: ActionReceiptRequest) { receipts += request }

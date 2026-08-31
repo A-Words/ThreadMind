@@ -144,6 +144,7 @@ data class ActionCardResponse(
 @Serializable data class CardVersionRequest(val expectedVersion: Int)
 @Serializable data class ActionCardEditRequest(
     val expectedVersion: Int,
+    val type: String? = null,
     val fields: Map<String, String>,
     val targetAccountId: String,
     val resolvedValidationIssues: List<String> = emptyList(),

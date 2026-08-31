@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { invariant } from "./errors.ts";
-import type { ActionCard, ActionReceipt, ConfirmedActionSnapshot, EvidenceRef } from "./model.ts";
+import type { ActionCard, ActionReceipt, ActionType, ConfirmedActionSnapshot, EvidenceRef } from "./model.ts";
 
 const requiredFields = {
   create_meeting: ["title", "startsAt", "endsAt", "timezone", "targetCalendarId"],
@@ -29,6 +29,7 @@ export function editCard(
   evidence: EvidenceRef[] = card.evidence,
   resolvedValidationIssues: string[] = [],
   targetAccountId: string | undefined = card.targetAccountId,
+  type: ActionType = card.type,
 ): ActionCard {
   invariant(!["executing", "succeeded", "cancelled"].includes(card.status), "card_not_editable", "Card can no longer be edited");
   const unknownIssue = resolvedValidationIssues.find((issue) => !card.validationIssues.includes(issue));
@@ -42,6 +43,7 @@ export function editCard(
   ]));
   return evaluateCard({
     ...editable,
+    type,
     version: card.version + 1,
     fields: structuredClone(fields),
     evidence: structuredClone(evidence),
