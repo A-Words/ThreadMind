@@ -5,6 +5,7 @@ export class InMemoryStore {
   readonly receipts: ActionReceipt[] = [];
   readonly memories = new Map<string, MemoryRecord>();
   readonly insights = new Map<string, InsightBundle>();
+  readonly insightGenerationKeys = new Map<string, string>();
   readonly submissions = new Map<string, ScreenshotSubmission>();
   readonly jobs = new Map<string, BackgroundJob>();
   readonly extractions = new Map<string, ContextExtraction>();

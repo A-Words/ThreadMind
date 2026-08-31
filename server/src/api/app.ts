@@ -5,9 +5,11 @@ import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../acco
 import type { ActionRepository } from "../adapters/action-repository.ts";
 import { InMemoryActionRepository } from "../adapters/in-memory-action-repository.ts";
 import { InMemorySubmissionRepository } from "../adapters/in-memory-submission-repository.ts";
+import { InMemoryInsightRepository } from "../adapters/in-memory-insight-repository.ts";
 import { InMemoryMemoryRepository } from "../adapters/in-memory-memory-repository.ts";
 import { InMemoryStore } from "../adapters/in-memory-store.ts";
 import type { MemoryRepository } from "../adapters/memory-repository.ts";
+import type { InsightRepository } from "../adapters/insight-repository.ts";
 import type { SubmissionRepository } from "../adapters/submission-repository.ts";
 import { InMemoryTemporaryImageStorage, type TemporaryImageStorage } from "../adapters/temporary-image-storage.ts";
 import { confirmCard, editCard, evaluateCard } from "../domain/action-card.ts";
@@ -15,13 +17,17 @@ import { DomainError } from "../domain/errors.ts";
 import type { ActionCard } from "../domain/model.ts";
 import { createMemory } from "../domain/memory.ts";
 import { prepareSubmission, sameSubmissionContent, SCREENSHOT_CONTENT_TYPES } from "../domain/submission.ts";
-import { cardEditInput, cardInput, cardVersionInput, executionInput, memoryInput, memoryRevisionInput, memorySearchInput, submissionFieldsInput } from "./schemas.ts";
+import { EvidenceBackedInsightGenerator, type InsightGenerator } from "../insight/insight-generator.ts";
+import { InsightService } from "../insight/insight-service.ts";
+import { cardEditInput, cardInput, cardVersionInput, executionInput, insightSearchInput, memoryInput, memoryRevisionInput, memorySearchInput, submissionFieldsInput } from "./schemas.ts";
 
 export interface AppOptions {
   allowInsecureAccountHeader?: boolean;
   auth?: AuthConfig;
   actionRepository?: ActionRepository;
   memoryRepository?: MemoryRepository;
+  insightRepository?: InsightRepository;
+  insightGenerator?: InsightGenerator;
   submissionRepository?: SubmissionRepository;
   temporaryImageStorage?: TemporaryImageStorage;
 }
@@ -30,6 +36,8 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   const app = Fastify({ logger: false });
   const actions = options.actionRepository ?? new InMemoryActionRepository(store);
   const memories = options.memoryRepository ?? new InMemoryMemoryRepository(store);
+  const insights = options.insightRepository ?? new InMemoryInsightRepository(store);
+  const insightService = new InsightService(insights, memories, options.insightGenerator ?? new EvidenceBackedInsightGenerator());
   const submissions = options.submissionRepository ?? new InMemorySubmissionRepository(store);
   const temporaryImages = options.temporaryImageStorage ?? new InMemoryTemporaryImageStorage();
   app.register(multipart, { limits: { files: 1, fileSize: 15 * 1024 * 1024, fields: 3, parts: 4 } });
@@ -158,7 +166,12 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
         };
     const result = await actions.recordExecution(request.accountId, request.params.id, input.receiptId, execution);
     if (!result) return reply.code(404).send({ error: "not_found" });
+    await insightService.ensureForReceipt(result.card, result.receipt);
     return reply.code(201).send(result.receipt);
+  });
+  app.get("/v1/insights", async (request) => {
+    const query = insightSearchInput.parse(request.query);
+    return { items: await insights.list(request.accountId, query.submissionId) };
   });
   app.get("/v1/memories", async (request) => {
     const query = memorySearchInput.parse(request.query);

@@ -62,6 +62,10 @@ export const memorySearchInput = z.object({
   message: "from must not be after to",
 });
 
+export const insightSearchInput = z.object({
+  submissionId: z.uuid().optional(),
+});
+
 export const memoryRevisionInput = z.object({
   assertion: z.string().min(1),
   sourceRef: z.string().min(1),

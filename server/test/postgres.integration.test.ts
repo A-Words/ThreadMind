@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { KyselyActionRepository } from "../src/adapters/kysely-action-repository.js";
 import { KyselyMemoryRepository } from "../src/adapters/kysely-memory-repository.js";
+import { KyselyInsightRepository } from "../src/adapters/kysely-insight-repository.js";
 import { KyselySubmissionRepository } from "../src/adapters/kysely-submission-repository.js";
 import { createDatabase } from "../src/database/database.js";
 import { confirmCard, evaluateCard } from "../src/domain/action-card.js";
 import { createMemory } from "../src/domain/memory.js";
+import { createInsightBundle } from "../src/domain/insight.js";
 import { prepareSubmission } from "../src/domain/submission.js";
 
 const accountId = process.env.THREADMIND_E2E_ACCOUNT_ID;
@@ -55,6 +57,7 @@ describe("PostgreSQL Action Repository", { skip: !enabled }, () => {
     const database = createDatabase(process.env);
     const repository = new KyselyActionRepository(database);
     const submissions = new KyselySubmissionRepository(database);
+    const insights = new KyselyInsightRepository(database);
     const cardId = randomUUID();
     const submissionId = randomUUID();
     const receiptId = randomUUID();
@@ -93,6 +96,22 @@ describe("PostgreSQL Action Repository", { skip: !enabled }, () => {
       assert.equal(recorded?.card.status, "succeeded");
       const repeated = await repository.recordExecution(accountId!, cardId, receiptId, { status: "succeeded", targetRecordId: "integration:contact" });
       assert.deepEqual(repeated, recorded);
+      const receiptEvidence = { sourceId: `receipt:${receiptId}`, excerpt: "Created integration:contact", confidence: 1 };
+      const bundle = createInsightBundle({
+        accountId: accountId!,
+        submissionId,
+        receipts: [recorded!.receipt],
+        items: [{
+          kind: "new_development", title: "Integration insight", explanation: "Contact was created.",
+          epistemicStatus: "fact", confidence: 1, evidenceRefs: [receiptEvidence.sourceId], evidence: [receiptEvidence],
+        }],
+        modelTrace: { model: "integration", promptVersion: "v1" },
+      });
+      const storedInsight = await insights.create(bundle, `receipt:${receiptId}`);
+      const repeatedInsight = await insights.create(bundle, `receipt:${receiptId}`);
+      assert.equal(repeatedInsight.id, storedInsight.id);
+      assert.equal((await insights.list(accountId!, submissionId)).some((item) => item.id === storedInsight.id), true);
+      assert.equal((await insights.list(randomUUID(), submissionId)).some((item) => item.id === storedInsight.id), false);
     } finally {
       await database.destroy();
     }

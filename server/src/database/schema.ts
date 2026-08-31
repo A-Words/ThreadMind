@@ -1,5 +1,5 @@
 import type { ColumnType } from "kysely";
-import type { ActionCard, ActionReceipt, BackgroundJob, ContextExtraction, EpistemicStatus, EvidenceRef, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
+import type { ActionCard, ActionReceipt, BackgroundJob, ContextExtraction, EpistemicStatus, EvidenceRef, InsightBundle, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | string>;
@@ -115,6 +115,17 @@ export interface MemoryRecordsTable {
   updated_at: Timestamp;
 }
 
+export interface InsightBundlesTable {
+  id: string;
+  account_id: string;
+  submission_id: string;
+  generation_key: string;
+  action_receipt_ids: JsonArray<string>;
+  items: JsonArray<InsightBundle["items"][number]>;
+  model_trace: ColumnType<InsightBundle["modelTrace"], string, string>;
+  generated_at: Timestamp;
+}
+
 export interface ThreadMindDatabase {
   "threadmind.action_cards": ActionCardsTable;
   "threadmind.action_receipts": ActionReceiptsTable;
@@ -122,4 +133,5 @@ export interface ThreadMindDatabase {
   "threadmind.background_jobs": BackgroundJobsTable;
   "threadmind.context_extractions": ContextExtractionsTable;
   "threadmind.memory_records": MemoryRecordsTable;
+  "threadmind.insight_bundles": InsightBundlesTable;
 }

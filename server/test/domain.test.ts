@@ -71,6 +71,19 @@ describe("Memory and insight invariants", () => {
   it("requires successful action receipts and evidence for formal insights", () => {
     const { receipt } = recordExecution(confirmCard(readyCard()), { status: "failed", errorCode: "provider_error" }, []);
     assert.throws(() => createInsightBundle({ accountId: "account-1", submissionId: "submission-1", receipts: [receipt], items: [], modelTrace: { model: "fake", promptVersion: "v1" } }), { code: "successful_action_required" });
+    const succeeded = recordExecution(confirmCard(readyCard()), { status: "succeeded", targetRecordId: "event-1" }, []).receipt;
+    const source = { sourceId: `receipt:${succeeded.id}`, excerpt: "Calendar Provider returned event-1", confidence: 1 };
+    const bundle = createInsightBundle({
+      accountId: "account-1",
+      submissionId: "submission-1",
+      receipts: [succeeded],
+      items: [{
+        kind: "new_development", title: "Created", explanation: "The confirmed meeting was created.",
+        epistemicStatus: "fact", confidence: 1, evidenceRefs: [source.sourceId], evidence: [source],
+      }],
+      modelTrace: { model: "fake", promptVersion: "v1" },
+    });
+    assert.deepEqual(bundle.actionReceiptIds, [succeeded.id]);
   });
 });
 

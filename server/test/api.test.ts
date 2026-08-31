@@ -29,6 +29,34 @@ describe("Action Card API", () => {
     const repeated = await app.inject({ method: "POST", url: `/v1/action-cards/${card.id}/receipts`, headers: { "x-account-id": "a1" }, payload: { receiptId, status: "succeeded", targetRecordId: "contact-42" } });
     assert.equal(repeated.statusCode, 201);
     assert.deepEqual(repeated.json(), receipt.json());
+    const insights = await app.inject({ method: "GET", url: `/v1/insights?submissionId=${submissionId}`, headers: { "x-account-id": "a1" } });
+    assert.equal(insights.statusCode, 200);
+    assert.equal(insights.json().items.length, 1);
+    assert.equal(insights.json().items[0].actionReceiptIds[0], receiptId);
+    assert.equal(insights.json().items[0].items[0].epistemicStatus, "fact");
+    assert.match(insights.json().items[0].items[0].evidence[0].excerpt, /contact-42/);
+    const hiddenInsights = await app.inject({ method: "GET", url: `/v1/insights?submissionId=${submissionId}`, headers: { "x-account-id": "a2" } });
+    assert.deepEqual(hiddenInsights.json().items, []);
+    const memories = await app.inject({ method: "GET", url: "/v1/memories", headers: { "x-account-id": "a1" } });
+    assert.deepEqual(memories.json().items, []);
+    await app.close();
+  });
+
+  it("does not create formal insights for failed execution", async () => {
+    const app = buildApp(undefined, { allowInsecureAccountHeader: true });
+    const cardId = randomUUID();
+    const submissionId = randomUUID();
+    await app.inject({ method: "POST", url: "/v1/action-cards", headers: { "x-account-id": "a1" }, payload: {
+      cardId, submissionId, type: "create_contact", fields: { displayName: "Chen", contactMethod: "chen@example.com", targetContactAccountId: "local" },
+      targetAccountId: "local", evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 0.99 }],
+    }});
+    await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/confirm`, headers: { "x-account-id": "a1" }, payload: { expectedVersion: 1 } });
+    const failed = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers: { "x-account-id": "a1" }, payload: {
+      receiptId: randomUUID(), status: "failed", errorCode: "provider_error", errorMessage: "Provider unavailable",
+    }});
+    assert.equal(failed.statusCode, 201);
+    const insights = await app.inject({ method: "GET", url: `/v1/insights?submissionId=${submissionId}`, headers: { "x-account-id": "a1" } });
+    assert.deepEqual(insights.json().items, []);
     await app.close();
   });
 

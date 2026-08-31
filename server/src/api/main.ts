@@ -1,6 +1,7 @@
 import { buildApp } from "./app.ts";
 import { KyselyActionRepository } from "../adapters/kysely-action-repository.ts";
 import { KyselyMemoryRepository } from "../adapters/kysely-memory-repository.ts";
+import { KyselyInsightRepository } from "../adapters/kysely-insight-repository.ts";
 import { KyselySubmissionRepository } from "../adapters/kysely-submission-repository.ts";
 import { createTemporaryImageStorage } from "../adapters/supabase-temporary-image-storage.ts";
 import { createDatabase } from "../database/database.ts";
@@ -10,6 +11,7 @@ const database = createDatabase(process.env);
 const app = buildApp(undefined, {
   actionRepository: new KyselyActionRepository(database),
   memoryRepository: new KyselyMemoryRepository(database),
+  insightRepository: new KyselyInsightRepository(database),
   submissionRepository: new KyselySubmissionRepository(database),
   temporaryImageStorage: createTemporaryImageStorage(process.env),
 });

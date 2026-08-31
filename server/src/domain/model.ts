@@ -151,6 +151,7 @@ export interface InsightItem {
   epistemicStatus: EpistemicStatus;
   confidence: number;
   evidenceRefs: Id[];
+  evidence: EvidenceRef[];
   suggestedAction?: string;
   suggestedAt?: string;
 }
