@@ -12,9 +12,9 @@
 | 云端多模态转录、顺序、说话人、实体、行动与 Evidence | 代码完成 | Responses strict JSON Schema adapter；LangGraph 分析/领域校验节点；Worker 自动化测试 | 使用脱敏/合成标注截图运行真实模型回归 |
 | 展示分析结果、低置信与 Action Cards 来源 | 代码完成 | `/v1/submissions/:id/extraction` 账户隔离测试；Android Room v3 持久转录、说话人、置信度与警告 | 真实模型输出的可读性与 Compose 长列表体验 |
 | 卡片完整字段、编辑增版、歧义处理、逐卡确认与取消 | 代码完成 | 服务端/Android Action policy 测试；会议、创建联系人、更新联系人字段模板；确认快照不可变 | 真实用户编辑三类卡片 |
-| 设备目标账户可见、可修改且来自实际 Provider | 代码完成 | Calendar/Contacts 可写账户枚举、选择后卡片增版、预检再次验证；ViewModel 测试 | 多账户、只读日历、设备本地联系人账户 |
+| 设备目标账户可见、可修改且来自实际 Provider | 代码完成 | Calendar 写权限级别过滤；Contacts 本地账户与支持上传的 sync adapter 过滤；选择后卡片增版、预检再次验证 | 多账户、只读日历、设备本地联系人账户 |
 | 重复会议、重复联系人与字段覆盖二次确认 | 代码完成 | Provider preflight、版本绑定持久审核、候选转换与字段旧值复核测试 | 真实 Provider 冲突、预检到写入间竞态 |
-| 无确认不写入；成功/失败/取消回执与可恢复重试 | 代码完成 | `ConfirmedActionSnapshot` 唯一写边界、稳定 marker、待同步回执、权限取消后卡片恢复测试 | 权限撤销、Provider 异常、进程终止与回执重放 |
+| 无确认不写入；成功/失败/取消回执与可恢复重试 | 代码完成 | `ConfirmedActionSnapshot` 唯一写边界、三类动作稳定 marker、待同步回执、确认后取消的幂等回执、权限取消后跨重启恢复测试 | 权限撤销、Provider 异常、进程终止与真实回执重放 |
 | 成功行动后即时、可解释的洞察；失败不伪装成功 | 代码完成（保守规则生成器） | 成功回执门禁、Evidence 强制、相关 Memory、会议/联系人下一步与 Insight History 测试 | 用户帮助度评测；生产模型方案若启用需独立评测 |
 
 ## Memory、隐私与数据控制
@@ -36,7 +36,7 @@
 | B 创建联系人 | 姓名/联系方式门禁、设备账户选择、重复搜索、可选字段批量写入均已实现 | 真实联系人账户写入 |
 | C 更新联系人 | 唯一候选选择、创建转更新、字段差异、旧值复核与仅选中字段写入均已实现 | 多 RawContact 与聚合联系人设备样本 |
 | D 歧义和重复 | validation issue 阻塞、低置信展示、会议/联系人预检与二次确认已实现 | 真实时间歧义模型样本及 Provider 竞态 |
-| E 权限和失败 | 无权限不写入、取消回执无目标 ID、卡片保持可重新确认、离线回执同步已实现 | 权限撤销和 Provider 故障注入 instrumentation |
+| E 权限和失败 | 无权限不写入、取消回执无目标 ID、卡片跨重启保持可重新确认、确认后主动取消也有独立回执、离线回执同步已实现 | 权限撤销和 Provider 故障注入 instrumentation |
 | F 洞察可解释性 | 成功回执门禁、事实/推断、置信度、展示 Evidence、有效记忆与下一步已实现 | 用户帮助度与建议采纳评测 |
 | G 记忆纠错和删除 | 修订增版、旧版 superseded、删除整条 lineage、活动召回过滤已实现 | Hosted RLS 下的真实回归 |
 | H 数据删除 | Storage、Submission、Extraction、Cards、Receipts、Memory 来源、Insights 与账户删除已实现 | 获授权后部署 migrations 并做 Hosted 全链路证明 |

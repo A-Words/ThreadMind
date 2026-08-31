@@ -5,7 +5,7 @@
 ## 已实现
 
 - `server/`：Node.js 24 + TypeScript + Fastify 模块化服务端。
-- Action Card：字段/evidence 校验、阻塞状态、编辑增版、逐版本确认、不可变确认快照、独立执行回执与账户隔离。
+- Action Card：字段/evidence 非空校验、阻塞状态、编辑增版、逐版本确认、不可变确认快照、独立执行回执与账户隔离；已确认卡片由用户取消时也会生成幂等 `cancelled` 回执。
 - Memory：来源强制、事实/推断标记、用户修正版本化、可读来源摘录、关键词/联系人/类型/时间检索、删除后正文抹除与默认召回过滤。
 - Insight：正式洞察必须存在同账户成功回执，每个 item 都有依据；按稳定生成键幂等持久化并提供账户隔离的历史查询。当前默认 generator 是保守的证据规则实现，不是生产模型。
 - Auth：生产入口通过 Supabase JWKS 验证 Bearer Token；不提供生产可用的账户头旁路。
@@ -15,20 +15,20 @@
 - 临时图片与任务：服务端使用 Supabase secret key 写入私有 `threadmind-submissions` bucket；Submission 元数据和 `analyze_submission` 任务在同一账户事务落库，队列 payload 不保存截图或正文。
 - Worker 处理闭环：后台任务使用带所有者校验的租约领取、续租、指数退避和最大尝试次数；模型输出经结构校验后，Extraction、Action Cards 与 Memory 在账户事务中幂等落库。原图删除成功后 Submission 才进入 `ready`，终态失败也先删图；删图失败会转为独立清理任务。租约被其他 Worker 接管后，旧 Worker 不再落库、删图或结束任务。
 - 独立 Worker 进程：`npm run dev:worker` / `npm run start:worker` 使用专属 `threadmind_worker_runtime` 数据库连接，支持空队列轮询、异常退避、SIGINT/SIGTERM 中断和连接池关闭；Dockerfile 提供彼此独立的 `api` 与 `worker` targets。
-- 多模态模型 adapter：`VisionExtractionModel` 的 OpenAI Responses 实现通过环境变量选择模型，不在代码中固定“生产模型”；请求发送截图 data URL 和补充文字，设置 `store: false`，使用 strict JSON Schema 输出。模型只返回业务载荷，服务端注入可信 `modelTrace`，随后仍经过 Evidence、Action 与 Memory 领域校验。
+- 多模态模型 adapter：`VisionExtractionModel` 的 OpenAI Responses 实现通过环境变量选择模型，不在代码中固定“生产模型”；请求设置 `store: false` 并使用 strict JSON Schema 输出。稳定规则使用 `developer` 消息，截图与补充文字作为明确的不可信 `user` 数据分离；模型只返回业务载荷，服务端注入可信 `modelTrace`，随后仍经过 Evidence、Action 与 Memory 领域校验。
 - AI 编排：Worker 使用 LangGraph 的 `multimodal_analysis → domain_validation` 两节点图；图只编排概率性提取，队列租约、RLS、Action 授权、回执和删除状态仍由 PostgreSQL 与领域代码决定。
 - `android/`：Kotlin + Compose + Material 3 + StateFlow + Hilt 工程，支持图片选择、Android 分享入口、卡片确认界面和按动作请求 Provider 权限。
-- Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录；确认前查询会议冲突和重复联系人，更新联系人时展示字段级旧值/新值并在写入前重新校验旧值。
+- Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录；创建会议、创建联系人和更新联系人三类写入均可识别已成功重放。确认前查询会议冲突和重复联系人，联系人账户只展示本地账户或支持上传的同步账户，更新联系人按账户名与账户类型选择 RawContact，并在写入前重新校验字段级旧值。
 - Android Auth：通过 supabase-kt 提供邮箱密码与六位 OTP 两种登录/注册方式；密码注册确认、找回密码和账户内设置密码都在 App 内验证邮件六位码，注册前强制确认隐私与数据处理说明，会话由 SDK 持久化和刷新。
 - Android API client：Retrofit/OkHttp/kotlinx.serialization 客户端从当前 Supabase Session 注入 Bearer Token，不接受账户 ID 头旁路。
 - Android Submission workflow：业务 repository 将待上传截图先复制到设备私有且不备份的目录，并使用按账户隔离的 Room 数据库保存 Submission、Action Card 缓存与待同步执行回执；WorkManager 在网络恢复后继续上传、轮询分析和同步回执。
 - Android 分析核对：账户隔离的 Extraction API 返回转录、说话人、置信度与警告；Android 将结果缓存到 Room v3，重启后仍可核对，并在 Action Card 之前展示低置信提示。
-- Android 恢复与幂等保护：应用重启后恢复最近提交、审核卡片和未同步回执；Provider 已完成但回执未同步时禁止再次执行，执行终态与回执在本地一并持久化。
+- Android 恢复与幂等保护：应用重启后恢复最近提交、审核卡片和未同步回执；Provider 已完成但回执未同步时禁止再次执行，执行终态与回执在本地一并持久化。权限拒绝产生 `cancelled` 回执但本地卡片保持 `failed` 可恢复态，重启后仍可重新确认。
 - Android Memory Center：读取活动记忆，展示事实/推断、置信度、版本、敏感级别与来源；支持保留历史的修订和确认后删除。
 - Android Insight History：展示执行后洞察、事实/推断、置信度、来源摘录与建议，不把洞察历史反向写入 Memory。
 - 数据控制：服务端提供版本化账户 JSON 导出、幂等单次提交删除、全量记忆清除和 Auth Admin 账户硬删除；Android 通过系统文档选择器导出，并在确认后同步清除 Room、WorkManager 与本地会话。已由用户确认写入系统 Provider 的记录不被后台删除。
 - Action 完成事实：成功回执会幂等生成一条由 Provider 记录 ID 支撑的事实记忆；来源绑定 Submission，删除该提交时一并从召回中抹除。失败或执行前取消不会生成完成事实。
-- Gradle Wrapper、服务端 Dockerfile、Node 和 Android 领域/API 自动化测试。
+- Gradle Wrapper、服务端 Dockerfile、最小 Docker build context、Node 和 Android 领域/API 自动化测试；Android Lint 已纳入本地验收，备份与设备迁移显式排除应用私有数据。
 
 ## 尚未接入
 
