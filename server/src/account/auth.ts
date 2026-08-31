@@ -6,6 +6,11 @@ export interface AuthConfig {
   issuer: string;
   audience: string;
 }
+
+export interface VerifiedIdentity {
+  accountId: string;
+  sessionId?: string;
+}
 export function authConfigFromEnv(env: NodeJS.ProcessEnv): AuthConfig {
   const jwksUrl = env.AUTH_JWKS_URL;
   const issuer = env.AUTH_ISSUER;
@@ -18,7 +23,7 @@ export function authConfigFromEnv(env: NodeJS.ProcessEnv): AuthConfig {
 
 export function createTokenVerifier(config: AuthConfig) {
   const keySet = createRemoteJWKSet(new URL(config.jwksUrl));
-  return async (authorization: string | undefined): Promise<string> => {
+  return async (authorization: string | undefined): Promise<VerifiedIdentity> => {
     if (!authorization?.startsWith("Bearer ")) throw new DomainError("unauthorized", "Bearer token is required");
     const { payload } = await jwtVerify(authorization.slice(7), keySet, {
       issuer: config.issuer,
@@ -26,6 +31,9 @@ export function createTokenVerifier(config: AuthConfig) {
       requiredClaims: ["sub"],
     });
     if (!payload.sub) throw new DomainError("unauthorized", "Token subject is required");
-    return payload.sub;
+    return {
+      accountId: payload.sub,
+      ...(typeof payload.session_id === "string" && payload.session_id.length > 0 ? { sessionId: payload.session_id } : {}),
+    };
   };
 }

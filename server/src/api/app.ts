@@ -3,6 +3,7 @@ import multipart from "@fastify/multipart";
 import { ZodError } from "zod";
 import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../account/auth.ts";
 import { InMemoryAuthAdmin, type AuthAdmin } from "../account/auth-admin.ts";
+import { InMemorySensitiveSessionVerifier, type SensitiveSessionVerifier } from "../account/sensitive-session-verifier.ts";
 import type { ActionRepository } from "../adapters/action-repository.ts";
 import type { AccountExportRepository } from "../adapters/account-export-repository.ts";
 import { InMemoryAccountExportRepository } from "../adapters/in-memory-account-export-repository.ts";
@@ -28,6 +29,7 @@ export interface AppOptions {
   allowInsecureAccountHeader?: boolean;
   auth?: AuthConfig;
   authAdmin?: AuthAdmin;
+  sensitiveSessionVerifier?: SensitiveSessionVerifier;
   actionRepository?: ActionRepository;
   accountExportRepository?: AccountExportRepository;
   memoryRepository?: MemoryRepository;
@@ -47,6 +49,7 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   const submissions = options.submissionRepository ?? new InMemorySubmissionRepository(store);
   const temporaryImages = options.temporaryImageStorage ?? new InMemoryTemporaryImageStorage();
   const authAdmin = options.authAdmin ?? new InMemoryAuthAdmin((accountId) => store.deleteAccount(accountId));
+  const sensitiveSessions = options.sensitiveSessionVerifier ?? new InMemorySensitiveSessionVerifier();
   app.register(multipart, { limits: { files: 1, fileSize: 15 * 1024 * 1024, fields: 3, parts: 4 } });
   const verifyToken = options.allowInsecureAccountHeader
     ? undefined
@@ -64,7 +67,9 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
       request.accountId = accountId;
       return;
     }
-    request.accountId = await verifyToken!(request.headers.authorization);
+    const identity = await verifyToken!(request.headers.authorization);
+    request.accountId = identity.accountId;
+    if (identity.sessionId) request.sessionId = identity.sessionId;
   });
   app.get("/health", { config: { public: true } }, async () => ({ status: "ok" }));
   app.post("/v1/submissions", async (request, reply) => {
@@ -189,8 +194,12 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     const query = insightSearchInput.parse(request.query);
     return { items: await insights.list(request.accountId, query.submissionId) };
   });
-  app.get("/v1/account/export", async (request) => accountExports.create(request.accountId));
+  app.get("/v1/account/export", async (request) => {
+    await sensitiveSessions.verify(request.accountId, request.sessionId);
+    return accountExports.create(request.accountId);
+  });
   app.delete("/v1/account", async (request, reply) => {
+    await sensitiveSessions.verify(request.accountId, request.sessionId);
     await temporaryImages.removeAccount(request.accountId);
     await authAdmin.deleteUser(request.accountId);
     return reply.code(204).send();
@@ -248,5 +257,8 @@ function domainErrorStatus(code: string): number {
 }
 
 declare module "fastify" {
-  interface FastifyRequest { accountId: string }
+  interface FastifyRequest {
+    accountId: string;
+    sessionId?: string;
+  }
 }

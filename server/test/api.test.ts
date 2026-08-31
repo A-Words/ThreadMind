@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { buildApp } from "../src/api/app.js";
 import { InMemoryAuthAdmin, type AuthAdmin } from "../src/account/auth-admin.js";
+import { InMemorySensitiveSessionVerifier } from "../src/account/sensitive-session-verifier.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { InMemoryTemporaryImageStorage } from "../src/adapters/temporary-image-storage.js";
 
@@ -204,7 +205,8 @@ describe("Submission API", () => {
 
 describe("Account data API", () => {
   it("exports only the current account without storage handles or credentials", async () => {
-    const app = buildApp(undefined, { allowInsecureAccountHeader: true });
+    const sensitiveSessions = new InMemorySensitiveSessionVerifier();
+    const app = buildApp(undefined, { allowInsecureAccountHeader: true, sensitiveSessionVerifier: sensitiveSessions });
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
     const submissionIds = { a1: randomUUID(), a2: randomUUID() };
     for (const account of ["a1", "a2"] as const) {
@@ -233,6 +235,18 @@ describe("Account data API", () => {
     assert.equal(exported.submissions[0].imageSha256, undefined);
     assert.deepEqual(exported.memories.map((item: { assertion: string }) => item.assertion), ["Memory a1"]);
     assert.equal(JSON.stringify(exported).includes("Memory a2"), false);
+    assert.deepEqual(sensitiveSessions.checks, [{ accountId: "a1", sessionId: undefined }]);
+    await app.close();
+  });
+
+  it("rejects sensitive account operations when the session is no longer active", async () => {
+    const sensitiveSessions = new InMemorySensitiveSessionVerifier(() => false);
+    const app = buildApp(undefined, { allowInsecureAccountHeader: true, sensitiveSessionVerifier: sensitiveSessions });
+    const exported = await app.inject({ method: "GET", url: "/v1/account/export", headers: { "x-account-id": "a1" } });
+    const deleted = await app.inject({ method: "DELETE", url: "/v1/account", headers: { "x-account-id": "a1" } });
+    assert.equal(exported.statusCode, 401);
+    assert.equal(deleted.statusCode, 401);
+    assert.equal(sensitiveSessions.checks.length, 2);
     await app.close();
   });
 

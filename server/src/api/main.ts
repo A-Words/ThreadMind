@@ -1,5 +1,6 @@
 import { buildApp } from "./app.ts";
 import { createAuthAdmin } from "../account/auth-admin.ts";
+import { KyselySensitiveSessionVerifier } from "../account/sensitive-session-verifier.ts";
 import { KyselyActionRepository } from "../adapters/kysely-action-repository.ts";
 import { KyselyAccountExportRepository } from "../adapters/kysely-account-export-repository.ts";
 import { KyselyMemoryRepository } from "../adapters/kysely-memory-repository.ts";
@@ -12,6 +13,7 @@ const port = Number(process.env.PORT ?? 3000);
 const database = createDatabase(process.env);
 const app = buildApp(undefined, {
   authAdmin: createAuthAdmin(process.env),
+  sensitiveSessionVerifier: new KyselySensitiveSessionVerifier(database),
   actionRepository: new KyselyActionRepository(database),
   accountExportRepository: new KyselyAccountExportRepository(database),
   memoryRepository: new KyselyMemoryRepository(database),
