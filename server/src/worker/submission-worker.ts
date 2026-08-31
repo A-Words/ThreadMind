@@ -1,19 +1,23 @@
 import { randomUUID } from "node:crypto";
 import type { BackgroundJob } from "../domain/model.ts";
-import { validateExtractionOutput } from "../extraction/extraction-output.ts";
+import { LangGraphExtractionWorkflow, type ExtractionWorkflow } from "../extraction/extraction-workflow.ts";
 import type { VisionExtractionModel } from "../extraction/vision-extraction-model.ts";
 import type { SubmissionProcessingRepository } from "../adapters/submission-processing-repository.ts";
 import type { TemporaryImageStorage } from "../adapters/temporary-image-storage.ts";
 import type { WorkerQueueRepository } from "../adapters/worker-queue-repository.ts";
 
 export class SubmissionWorker {
+  private readonly workflow: ExtractionWorkflow;
+
   constructor(
     private readonly workerId: string,
     private readonly queue: WorkerQueueRepository,
     private readonly processing: SubmissionProcessingRepository,
     private readonly storage: TemporaryImageStorage,
-    private readonly model: VisionExtractionModel,
-  ) {}
+    model: VisionExtractionModel,
+  ) {
+    this.workflow = new LangGraphExtractionWorkflow(model);
+  }
 
   async runOne(now = new Date()): Promise<boolean> {
     const job = await this.queue.claim(this.workerId, now);
@@ -42,13 +46,12 @@ export class SubmissionWorker {
     }
     if (!state.extraction) {
       const image = await this.storage.get(state.submission.imageObjectPath);
-      const raw = await this.model.analyze({
+      const analysis = await this.workflow.analyze({
         image,
         contentType: state.submission.imageContentType,
         ...(state.submission.supplementalText ? { supplementalText: state.submission.supplementalText } : {}),
-      });
+      }, { accountId: job.accountId, submissionId: job.aggregateId }, now);
       await this.requireLease(job);
-      const analysis = validateExtractionOutput(raw, { accountId: job.accountId, submissionId: job.aggregateId }, now);
       await this.processing.save(job.accountId, job.aggregateId, analysis);
     }
     await this.requireLease(job);
