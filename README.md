@@ -38,10 +38,10 @@ ThreadMind 是一个面向 Android 用户的个人关系与行动 Agent：它理
 
 ## 当前实现
 
-仓库已包含第一条可运行 MVP 纵向切片：
+仓库已包含可运行的 MVP 主链路：
 
-- `server/`：Fastify API、带类型/大小/指纹校验的截图提交、私有 Supabase Storage adapter、PostgreSQL-backed 分析任务、可检索 Memory、持久 Insight History、账户导出/删除、Supabase JWT 验证、Kysely repositories、强制 RLS migration 与 Dockerfile。
-- `android/`：Compose 客户端、Supabase 邮箱密码与六位 OTP 登录、App 内密码找回/设置、带 Bearer Token 的 Retrofit 客户端、可搜索/修订/删除/清空的 Memory Center、Insight History、系统分享入口、数据导出与删除控制、卡片确认状态机，以及只接受确认快照的 Calendar/Contacts Provider executor。
-- 自动化测试覆盖未确认禁止执行、编辑后确认失效、失败回执不生成目标 ID、记忆纠错/删除过滤、数据库账户隔离、洞察证据、导出/删除语义和 API 状态；真实 E2E 已覆盖 Android Session → API → Supabase PostgreSQL → RLS → Memory Center。
+- `server/`：Fastify API、独立 Worker、可替换的 Responses 多模态 adapter、带类型/大小/指纹校验的截图提交、私有 Supabase Storage、PostgreSQL-backed 分析任务、可检索 Memory、持久 Insight History、账户导出/删除、Supabase JWT 验证、Kysely repositories、强制 RLS migration，以及 API/Worker 两个 Docker targets。
+- `android/`：Compose 客户端、Supabase 邮箱密码与六位 OTP 登录、App 内密码找回/设置、带 Bearer Token 的 Retrofit 客户端、可搜索/修订/删除/清空的 Memory Center、Insight History、系统分享入口、数据导出与删除控制、卡片确认状态机，以及带会议冲突、重复联系人和更新字段差异预检的 Calendar/Contacts Provider executor。
+- 自动化测试覆盖未确认禁止执行、编辑后确认失效、Provider 预检、失败回执不生成目标 ID、记忆纠错/删除过滤、数据库账户隔离、洞察证据、Worker 租约、模型输出边界、导出/删除语义和 API 状态；真实 E2E 已覆盖 Android Session → API → Supabase PostgreSQL → RLS → Memory Center。
 
 运行方式、已实现范围及尚未接入的生产能力见 [实现说明](docs/IMPLEMENTATION.md)。PRD、RFC 和 ADR 仍是后续实现的约束来源。

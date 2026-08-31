@@ -1,6 +1,6 @@
 # ThreadMind 实现说明
 
-当前实现已覆盖 MVP 的主要本地与服务端交互面，并把授权、证据、账户隔离、可恢复执行与删除语义编码。生产视觉模型与独立 Worker 部署仍未完成，因此不能把当前规则生成器描述成生产 AI 链路。
+当前实现已覆盖 MVP 的主要本地与服务端交互面，并把授权、证据、账户隔离、可恢复执行与删除语义编码。独立 Worker 进程和可配置的多模态模型 adapter 已接通；但尚未用脱敏/合成标注集选定并验收生产模型，因此不能把任意配置的模型描述成已验证的生产 AI 链路。
 
 ## 已实现
 
@@ -14,8 +14,10 @@
 - Screenshot Submission API：接收单张 PNG/JPEG/WebP multipart 图片，限制 15 MiB，校验文件签名并计算 SHA-256；相同提交 UUID 和内容可安全重试，API 响应不暴露 Storage 路径或指纹。
 - 临时图片与任务：服务端使用 Supabase secret key 写入私有 `threadmind-submissions` bucket；Submission 元数据和 `analyze_submission` 任务在同一账户事务落库，队列 payload 不保存截图或正文。
 - Worker 处理闭环：后台任务使用带所有者校验的租约领取、续租、指数退避和最大尝试次数；模型输出经结构校验后，Extraction、Action Cards 与 Memory 在账户事务中幂等落库。原图删除成功后 Submission 才进入 `ready`，终态失败也先删图；删图失败会转为独立清理任务。租约被其他 Worker 接管后，旧 Worker 不再落库、删图或结束任务。
+- 独立 Worker 进程：`npm run dev:worker` / `npm run start:worker` 使用专属 `threadmind_worker_runtime` 数据库连接，支持空队列轮询、异常退避、SIGINT/SIGTERM 中断和连接池关闭；Dockerfile 提供彼此独立的 `api` 与 `worker` targets。
+- 多模态模型 adapter：`VisionExtractionModel` 的 OpenAI Responses 实现通过环境变量选择模型，不在代码中固定“生产模型”；请求发送截图 data URL 和补充文字，设置 `store: false`，使用 strict JSON Schema 输出。模型只返回业务载荷，服务端注入可信 `modelTrace`，随后仍经过 Evidence、Action 与 Memory 领域校验。
 - `android/`：Kotlin + Compose + Material 3 + StateFlow + Hilt 工程，支持图片选择、Android 分享入口、卡片确认界面和按动作请求 Provider 权限。
-- Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录。
+- Android Provider executor：只接受 `ConfirmedActionSnapshot`，支持 Calendar/Contacts 写入，并在重试前通过稳定 marker 检查既有记录；确认前查询会议冲突和重复联系人，更新联系人时展示字段级旧值/新值并在写入前重新校验旧值。
 - Android Auth：通过 supabase-kt 提供邮箱密码与六位 OTP 两种登录/注册方式；密码注册确认、找回密码和账户内设置密码都在 App 内验证邮件六位码，注册前强制确认隐私与数据处理说明，会话由 SDK 持久化和刷新。
 - Android API client：Retrofit/OkHttp/kotlinx.serialization 客户端从当前 Supabase Session 注入 Bearer Token，不接受账户 ID 头旁路。
 - Android Submission workflow：业务 repository 将待上传截图先复制到设备私有且不备份的目录，并使用按账户隔离的 Room 数据库保存 Submission、Action Card 缓存与待同步执行回执；WorkManager 在网络恢复后继续上传、轮询分析和同步回执。
@@ -27,8 +29,8 @@
 
 ## 尚未接入
 
-- 可部署的独立 Worker 进程入口、生产视觉模型 adapter、LangGraph 提取流程及模型评测集。当前只有可替换模型接口、严格输出契约和已自动化验证的单任务处理器，尚不能表述为生产模型链路已接通。
-- Android 的重复联系人/会议冲突审核界面。
+- LangGraph 提取编排、脱敏/合成模型评测集，以及基于评测结果选定的生产模型配置。当前 adapter 与严格输出契约已接通，但没有真实模型凭证与回归集的验证证据。
+- Android Provider 目标账户仍以可见、可编辑 ID 输入为主，尚未实现从设备实际日历/联系人账户枚举出的选择器；会议/联系人数据也可能在预检和最终写入之间发生变化，联系人更新已做写入时旧值复核，会议和创建联系人仍需更强的竞态保护。
 - 真实设备上的联系人/日历写入、权限撤销、账户删除、导出文件回读和中国大陆网络验证。
 - 新增的 Memory 来源证据与 Insight 生成键迁移尚未应用到 Hosted 项目，远端集成测试会在迁移前因缺列失败；应用 migration 属于外部数据库变更，需要明确部署授权。
 
@@ -44,6 +46,8 @@ npm run typecheck
 npm test
 npm run test:integration
 npm run build
+npm run dev          # API
+npm run dev:worker   # independent Worker
 ```
 
 Android：
@@ -73,7 +77,7 @@ Supabase Hosted 项目的 Auth 配置必须满足：
 - 配置自定义 SMTP，并用中国大陆常见邮箱验证真实送达率；不得将 Supabase 默认邮件服务作为生产通道。
 - Minimum password length 至少为 8。客户端只提前检查八位长度和两次输入一致，字符组合、泄露密码拦截和最终强度判断以 Supabase Auth 为准。
 
-服务端启动前复制 `.env.example` 为仓库根目录下的 `.env`，配置真实 Supabase Auth 项目、`DATABASE_URL` 和 `THREADMIND_E2E_ACCOUNT_ID`。`DATABASE_URL` 使用 `threadmind_runtime` 登录角色，不使用 `postgres`、`service_role` 或 Android publishable key。持久 Fastify 服务优先使用 session pooler（5432）；短生命周期环境可使用 transaction pooler（6543），当前 `pg`/Kysely 查询不启用命名 prepared statements。
+服务端启动前复制 `.env.example` 为仓库根目录下的 `.env`，配置真实 Supabase Auth 项目、`DATABASE_URL` 和 `THREADMIND_E2E_ACCOUNT_ID`。`DATABASE_URL` 使用 `threadmind_runtime` 登录角色，不使用 `postgres`、`service_role` 或 Android publishable key。Worker 另用 `THREADMIND_WORKER_DATABASE_URL`，登录角色必须为 `threadmind_worker_runtime`，不能复用 API 登录连接。持久进程优先使用 session pooler（5432）；短生命周期环境可使用 transaction pooler（6543），当前 `pg`/Kysely 查询不启用命名 prepared statements。
 
 `DATABASE_SSL_REJECT_UNAUTHORIZED` 默认必须为 `true`。只有本地被受信调试代理替换证书且已核对代理边界时才可在忽略的 `.env` 中临时设为 `false`，不得复制到部署环境。`npm run dev` 和 `npm start` 会自动读取根目录 `.env`；部署环境仍可直接注入环境变量。`x-account-id` 只在测试构造的显式不安全模式中启用，普通启动不会接受它。
 
@@ -88,6 +92,15 @@ Supabase Hosted 项目的 Auth 配置必须满足：
 7. `server/migrations/20260831130616_verify_active_session.sql` 暴露最小权限的 session 存活检查；账户导出和账户删除除 JWT 验签外还必须验证 `session_id` 仍属于当前账户。
 
 截图上传和账户硬删除还要求服务端环境配置 `SUPABASE_URL`、仅服务端可见的 `SUPABASE_SECRET_KEY`，以及可选的 `SUPABASE_STORAGE_BUCKET`。Android 仍只配置 publishable key；secret key 不得写入 `local.properties`、APK 或客户端日志。
+
+Worker 还要求仅服务端可见的 `OPENAI_API_KEY` 和 `THREADMIND_VISION_MODEL`。模型名必须来自当前部署的评测结论，仓库不提供默认生产模型。可选的 `OPENAI_BASE_URL`、`THREADMIND_MODEL_TIMEOUT_MS`、`THREADMIND_MODEL_MAX_OUTPUT_TOKENS`、Worker 轮询与退避参数均列在 `.env.example`。Responses adapter 的接口形状以 [OpenAI Responses API](https://developers.openai.com/api/reference/typescript/resources/beta/subresources/responses/methods/create) 为准；单元测试使用注入的本地 `fetch`，不会发送真实截图或调用外部模型。
+
+容器可以从同一 Dockerfile 分别构建：
+
+```powershell
+docker build -f server/Dockerfile --target api -t threadmind-api .
+docker build -f server/Dockerfile --target worker -t threadmind-worker .
+```
 
 每个 repository 操作都在短事务内执行 `SET LOCAL ROLE threadmind_api`，再用 JWT `sub` 写入 transaction-local `app.current_account_id`。RLS policy 从该设置读取账户，事务结束后上下文自动清除。Memory 创建、修订和删除，以及 Action Card 创建、确认和回执写入都具有可恢复语义；非幂等的卡片编辑使用 `expectedVersion` 拒绝重复应用。详细决策见 [ADR-0002](adrs/0002-postgresql-rls-context.md)。
 
