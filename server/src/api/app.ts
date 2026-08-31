@@ -105,6 +105,15 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     const submission = await submissions.find(request.accountId, id);
     return submission ? publicSubmission(submission) : reply.code(404).send({ error: "not_found" });
   });
+  app.delete<{ Params: { id: string } }>("/v1/submissions/:id", async (request, reply) => {
+    const id = submissionFieldsInput.shape.submissionId.parse(request.params.id);
+    const submission = await submissions.find(request.accountId, id);
+    if (!submission) return reply.code(204).send();
+    await temporaryImages.remove(submission.imageObjectPath);
+    await memories.removeSubmissionSource(request.accountId, id);
+    await submissions.remove(request.accountId, id);
+    return reply.code(204).send();
+  });
   app.get<{ Params: { id: string } }>("/v1/submissions/:id/action-cards", async (request, reply) => {
     const id = submissionFieldsInput.shape.submissionId.parse(request.params.id);
     if (!await submissions.find(request.accountId, id)) return reply.code(404).send({ error: "not_found" });

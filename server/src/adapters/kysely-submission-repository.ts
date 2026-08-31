@@ -46,6 +46,17 @@ export class KyselySubmissionRepository implements SubmissionRepository {
       return toSubmission(created);
     }));
   }
+
+  async remove(accountId: string, id: string): Promise<boolean> {
+    return retryTransient(() => withAccount(this.database, accountId, async (transaction) => {
+      const deleted = await transaction
+        .deleteFrom("threadmind.screenshot_submissions")
+        .where("id", "=", id)
+        .returning("id")
+        .executeTakeFirst();
+      return deleted !== undefined;
+    }));
+  }
 }
 
 function toSubmissionRow(submission: ScreenshotSubmission): Insertable<ScreenshotSubmissionsTable> {

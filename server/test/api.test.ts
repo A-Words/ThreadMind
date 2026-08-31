@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { buildApp } from "../src/api/app.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
+import { InMemoryTemporaryImageStorage } from "../src/adapters/temporary-image-storage.js";
 
 describe("Action Card API", () => {
   it("isolates cards by account and executes only after confirmation", async () => {
@@ -141,7 +142,8 @@ describe("Action Card API", () => {
 describe("Submission API", () => {
   it("stores one account-scoped submission, enqueues once and hides the storage handle", async () => {
     const store = new InMemoryStore();
-    const app = buildApp(store, { allowInsecureAccountHeader: true });
+    const temporaryImages = new InMemoryTemporaryImageStorage();
+    const app = buildApp(store, { allowInsecureAccountHeader: true, temporaryImageStorage: temporaryImages });
     const submissionId = randomUUID();
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
     const request = multipartPayload({ submissionId, source: "android_share", supplementalText: "客户陈先生" }, png, "image/png");
@@ -177,6 +179,24 @@ describe("Submission API", () => {
     const conflict = await app.inject({ method: "POST", url: "/v1/submissions", headers: { "x-account-id": "a1", "content-type": conflictingRequest.contentType }, payload: conflictingRequest.body });
     assert.equal(conflict.statusCode, 409);
     assert.equal(conflict.json().error, "submission_conflict");
+    const memory = await app.inject({ method: "POST", url: "/v1/memories", headers: { "x-account-id": "a1" }, payload: {
+      subjectRefs: ["contact-1"], type: "profile", assertion: "Chen works at A", epistemicStatus: "fact",
+      confidence: 0.9, sensitivity: "normal", sourceRefs: [`${submissionId}:e1`],
+      sourceEvidence: [{ sourceId: `${submissionId}:e1`, excerpt: "Works at A", confidence: 0.9 }],
+    }});
+    assert.equal(memory.statusCode, 201);
+    const hiddenDelete = await app.inject({ method: "DELETE", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a2" } });
+    assert.equal(hiddenDelete.statusCode, 204);
+    assert.equal(store.submissions.has(submissionId), true);
+    const removed = await app.inject({ method: "DELETE", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a1" } });
+    assert.equal(removed.statusCode, 204);
+    assert.equal(temporaryImages.has(`a1/${submissionId}`), false);
+    assert.equal(store.submissions.has(submissionId), false);
+    assert.equal([...store.jobs.values()].some((job) => job.aggregateId === submissionId), false);
+    assert.equal([...store.cards.values()].some((card) => card.submissionId === submissionId), false);
+    assert.equal(store.memories.get(memory.json().id)?.assertion, "[deleted]");
+    const repeatedDelete = await app.inject({ method: "DELETE", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a1" } });
+    assert.equal(repeatedDelete.statusCode, 204);
     await app.close();
   });
 });
