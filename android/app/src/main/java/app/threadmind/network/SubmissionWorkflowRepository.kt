@@ -146,9 +146,10 @@ class AndroidSubmissionWorkflowRepository(
     override suspend fun reportExecution(cardId: String, request: ActionReceiptRequest) {
         val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
         val now = System.currentTimeMillis()
+        val cardStatus = recoverableCardStatus(request.status)
         val cardPayload = dao.card(accountId, cardId)?.let { cached ->
             WorkflowSyncEngine.json.decodeFromString<ActionCardResponse>(cached.payloadJson)
-                .copy(status = request.status)
+                .copy(status = cardStatus)
                 .let(WorkflowSyncEngine.json::encodeToString)
         }
         dao.recordPendingReceipt(
@@ -159,7 +160,7 @@ class AndroidSubmissionWorkflowRepository(
                 payloadJson = WorkflowSyncEngine.json.encodeToString(request),
                 createdAtEpochMillis = now,
             ),
-            cardStatus = request.status,
+            cardStatus = cardStatus,
             cardPayloadJson = cardPayload,
             updatedAt = now,
         )
@@ -296,3 +297,6 @@ private fun detectImageContentType(bytes: ByteArray): String? = when {
     bytes.size >= 12 && bytes.copyOfRange(0, 4).decodeToString() == "RIFF" && bytes.copyOfRange(8, 12).decodeToString() == "WEBP" -> "image/webp"
     else -> null
 }
+
+internal fun recoverableCardStatus(receiptStatus: String): String =
+    if (receiptStatus == "cancelled") "failed" else receiptStatus
