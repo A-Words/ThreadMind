@@ -10,6 +10,10 @@ import app.threadmind.domain.EvidenceRef
 import app.threadmind.network.MemoryListResponse
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.MemoryRevisionRequest
+import app.threadmind.network.InsightBundleResponse
+import app.threadmind.network.InsightItemResponse
+import app.threadmind.network.InsightListResponse
+import app.threadmind.network.EvidenceRefResponse
 import app.threadmind.network.ActionCardListResponse
 import app.threadmind.network.ActionCardEditRequest
 import app.threadmind.network.ActionCardResponse
@@ -99,6 +103,7 @@ class MainViewModelTest {
         assertEquals(ActionStatus.SUCCEEDED, viewModel.state.value.cards.single().status)
         assertEquals("succeeded", submissions.receipts.single().status)
         assertEquals("record-1", submissions.receipts.single().targetRecordId)
+        assertEquals("insight-1", viewModel.state.value.insights.single().id)
     }
 
     @Test fun `backend check restores latest review and pending receipt`() = runTest(dispatcher) {
@@ -210,6 +215,8 @@ private class FakeThreadMindApi : ThreadMindApi {
         return MemoryListResponse(listOfNotNull(memory))
     }
 
+    override suspend fun listInsights(submissionId: String?) = InsightListResponse(listOf(insightBundle()))
+
     override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): SubmissionResponse = error("unused")
     override suspend fun getSubmission(id: String): SubmissionResponse = error("unused")
     override suspend fun listActionCards(id: String): ActionCardListResponse = error("unused")
@@ -254,6 +261,24 @@ private fun memoryRecord(
     version = version,
     supersedesId = supersedesId,
     status = "active",
+)
+
+private fun insightBundle() = InsightBundleResponse(
+    id = "insight-1",
+    submissionId = "submission-1",
+    actionReceiptIds = listOf("receipt-1"),
+    items = listOf(
+        InsightItemResponse(
+            kind = "new_development",
+            title = "已完成确认的行动",
+            explanation = "联系人已写入系统。",
+            epistemicStatus = "fact",
+            confidence = 1.0,
+            evidenceRefs = listOf("receipt:receipt-1"),
+            evidence = listOf(EvidenceRefResponse("receipt:receipt-1", excerpt = "Contacts Provider 返回 record-1", confidence = 1.0)),
+        ),
+    ),
+    generatedAt = "2026-08-31T00:00:00Z",
 )
 
 private class FakeProviderExecutor : ProviderExecutor {

@@ -59,6 +59,7 @@ import app.threadmind.domain.ActionCard
 import app.threadmind.domain.ActionStatus
 import app.threadmind.domain.ActionType
 import app.threadmind.network.MemoryRecordResponse
+import app.threadmind.network.InsightBundleResponse
 import app.threadmind.ui.theme.ThreadMindTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -306,6 +307,23 @@ private fun ThreadMindScreen(
                     onRetryReceipt = { viewModel.retryReceipt(card.id) },
                 )
             }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("洞察与下一步", style = MaterialTheme.typography.headlineSmall)
+                    TextButton(onClick = viewModel::refreshInsights, enabled = !state.isInsightLoading) { Text("刷新") }
+                }
+                Text("正式执行后洞察只引用成功回执、当前来源和有效记忆；历史洞察不会反向成为事实记忆。")
+                if (state.isInsightLoading) CircularProgressIndicator()
+                if (state.backendStatus == BackendStatus.CONNECTED && state.insights.isEmpty()) {
+                    Text("成功执行至少一张卡片后，这里会显示有依据的洞察。")
+                }
+                state.insightMessage?.let { Text(it) }
+            }
+            items(state.insights, key = InsightBundleResponse::id) { bundle -> InsightBundleCard(bundle) }
             state.message?.let { item { Text(it) } }
         }
     }
@@ -444,6 +462,25 @@ private fun MemoryCard(
                     enabled = !isPending && assertion.isNotBlank() && assertion != memory.assertion,
                 ) { Text(if (isPending) "处理中…" else "保存修订") }
                 TextButton(onClick = onDelete, enabled = !isPending) { Text("删除") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InsightBundleCard(bundle: InsightBundleResponse) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("生成于 ${bundle.generatedAt}", style = MaterialTheme.typography.labelLarge)
+            bundle.items.forEach { item ->
+                Text(item.title, style = MaterialTheme.typography.titleMedium)
+                Text("${if (item.epistemicStatus == "fact") "事实" else "推断"} · 置信度 ${(item.confidence * 100).toInt()}%")
+                Text(item.explanation)
+                item.evidence.forEach { evidence ->
+                    Text("依据：${evidence.excerpt} (${(evidence.confidence * 100).toInt()}%)")
+                }
+                item.suggestedAction?.let { Text("建议行动：$it") }
+                item.suggestedAt?.let { Text("建议时间：$it") }
             }
         }
     }

@@ -35,6 +35,31 @@ import okhttp3.MediaType.Companion.toMediaType
 data class MemoryListResponse(val items: List<MemoryRecordResponse>)
 
 @Serializable
+data class InsightListResponse(val items: List<InsightBundleResponse>)
+
+@Serializable
+data class InsightBundleResponse(
+    val id: String,
+    val submissionId: String,
+    val actionReceiptIds: List<String>,
+    val items: List<InsightItemResponse>,
+    val generatedAt: String,
+)
+
+@Serializable
+data class InsightItemResponse(
+    val kind: String,
+    val title: String,
+    val explanation: String,
+    val epistemicStatus: String,
+    val confidence: Double,
+    val evidenceRefs: List<String>,
+    val evidence: List<EvidenceRefResponse>,
+    val suggestedAction: String? = null,
+    val suggestedAt: String? = null,
+)
+
+@Serializable
 data class MemoryRecordResponse(
     val id: String,
     val subjectRefs: List<String>,
@@ -192,6 +217,9 @@ interface ThreadMindApi {
         @Query("to") createdTo: String? = null,
     ): MemoryListResponse
 
+    @GET("v1/insights")
+    suspend fun listInsights(@Query("submissionId") submissionId: String? = null): InsightListResponse
+
     @PATCH("v1/memories/{id}")
     suspend fun reviseMemory(
         @Path("id") id: String,
@@ -213,6 +241,7 @@ class UnavailableThreadMindApi(
     override suspend fun cancelActionCard(id: String): Nothing = error(reason)
     override suspend fun createActionReceipt(id: String, request: ActionReceiptRequest): Nothing = error(reason)
     override suspend fun listMemories(search: String?, subjectRef: String?, type: String?, createdFrom: String?, createdTo: String?): Nothing = error(reason)
+    override suspend fun listInsights(submissionId: String?): Nothing = error(reason)
     override suspend fun reviseMemory(id: String, request: MemoryRevisionRequest): Nothing = error(reason)
     override suspend fun deleteMemory(id: String): Nothing = error(reason)
 }

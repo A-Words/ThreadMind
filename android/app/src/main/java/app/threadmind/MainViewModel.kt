@@ -11,6 +11,7 @@ import app.threadmind.network.ThreadMindApi
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.MemoryRevisionRequest
 import app.threadmind.network.ActionReceiptRequest
+import app.threadmind.network.InsightBundleResponse
 import app.threadmind.network.SubmissionProgress
 import app.threadmind.network.SubmissionWorkflowRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -50,6 +51,9 @@ data class MainUiState(
     val memoryType: String? = null,
     val memoryTimeFilter: MemoryTimeFilter = MemoryTimeFilter.ALL,
     val isMemoryLoading: Boolean = false,
+    val insights: List<InsightBundleResponse> = emptyList(),
+    val isInsightLoading: Boolean = false,
+    val insightMessage: String? = null,
 )
 
 enum class BackendStatus { IDLE, CHECKING, CONNECTED, FAILED }
@@ -181,8 +185,9 @@ class MainViewModel @Inject constructor(
             mutableState.update {
                 it.copy(backendStatus = BackendStatus.CHECKING, backendMessage = "正在验证服务端身份…")
             }
-            runCatching { listMemories(filters) to submissions.restoreLatest() }
-                .onSuccess { (response, restored) ->
+            runCatching {
+                Triple(listMemories(filters), submissions.restoreLatest(), api.listInsights())
+            }.onSuccess { (response, restored, insightResponse) ->
                     mutableState.update {
                         it.copy(
                             backendStatus = BackendStatus.CONNECTED,
@@ -195,6 +200,8 @@ class MainViewModel @Inject constructor(
                             cards = restored?.cards.orEmpty(),
                             pendingReceipts = restored?.pendingReceipts.orEmpty(),
                             submissionMessage = restored?.let(::progressMessage),
+                            insights = insightResponse.items,
+                            insightMessage = null,
                         )
                     }
                 }
@@ -203,6 +210,30 @@ class MainViewModel @Inject constructor(
                         it.copy(
                             backendStatus = BackendStatus.FAILED,
                             backendMessage = error.message?.takeIf(String::isNotBlank) ?: "服务端连接失败",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun refreshInsights() {
+        viewModelScope.launch {
+            mutableState.update { it.copy(isInsightLoading = true, insightMessage = null) }
+            runCatching { api.listInsights() }
+                .onSuccess { response ->
+                    mutableState.update {
+                        it.copy(
+                            insights = response.items,
+                            isInsightLoading = false,
+                            insightMessage = "已刷新 ${response.items.size} 组洞察",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            isInsightLoading = false,
+                            insightMessage = error.message?.takeIf(String::isNotBlank) ?: "洞察刷新失败",
                         )
                     }
                 }
@@ -399,22 +430,34 @@ class MainViewModel @Inject constructor(
     fun retryReceipt(cardId: String) {
         val request = state.value.pendingReceipts[cardId] ?: return
         viewModelScope.launch {
-            runCatching { submissions.reportExecution(cardId, request) }
-                .onSuccess {
-                    mutableState.update { it.copy(pendingReceipts = it.pendingReceipts - cardId, message = "执行回执已同步") }
+            val report = runCatching { submissions.reportExecution(cardId, request) }
+            if (report.isSuccess) {
+                val refreshed = runCatching { api.listInsights() }
+                mutableState.update {
+                    it.copy(
+                        pendingReceipts = it.pendingReceipts - cardId,
+                        message = "执行回执已同步",
+                        insights = refreshed.getOrNull()?.items ?: it.insights,
+                        insightMessage = refreshed.exceptionOrNull()?.let { error -> error.message ?: "回执已同步，但洞察刷新失败" },
+                    )
                 }
-                .onFailure { error -> mutableState.update { it.copy(message = error.message ?: "执行回执同步失败") } }
+            } else {
+                mutableState.update { it.copy(message = report.exceptionOrNull()?.message ?: "执行回执同步失败") }
+            }
         }
     }
 
     private suspend fun recordOutcome(cardId: String, request: ActionReceiptRequest, status: ActionStatus, successMessage: String) {
         val report = runCatching { submissions.reportExecution(cardId, request) }
+        val refreshed = if (report.isSuccess && status == ActionStatus.SUCCEEDED) runCatching { api.listInsights() } else null
         mutableState.update { current ->
             current.copy(
                 cards = current.cards.map { if (it.id == cardId) it.copy(status = status) else it },
                 pendingCardIds = current.pendingCardIds - cardId,
                 pendingReceipts = if (report.isSuccess) current.pendingReceipts - cardId else current.pendingReceipts + (cardId to request),
                 message = if (report.isSuccess) successMessage else "$successMessage；执行回执尚未同步，请勿再次写入",
+                insights = refreshed?.getOrNull()?.items ?: current.insights,
+                insightMessage = refreshed?.exceptionOrNull()?.let { error -> error.message ?: "行动已完成，但洞察刷新失败" },
             )
         }
     }
