@@ -1,5 +1,6 @@
 import { buildApp } from "./app.ts";
 import { KyselyActionRepository } from "../adapters/kysely-action-repository.ts";
+import { KyselyAccountExportRepository } from "../adapters/kysely-account-export-repository.ts";
 import { KyselyMemoryRepository } from "../adapters/kysely-memory-repository.ts";
 import { KyselyInsightRepository } from "../adapters/kysely-insight-repository.ts";
 import { KyselySubmissionRepository } from "../adapters/kysely-submission-repository.ts";
@@ -10,6 +11,7 @@ const port = Number(process.env.PORT ?? 3000);
 const database = createDatabase(process.env);
 const app = buildApp(undefined, {
   actionRepository: new KyselyActionRepository(database),
+  accountExportRepository: new KyselyAccountExportRepository(database),
   memoryRepository: new KyselyMemoryRepository(database),
   insightRepository: new KyselyInsightRepository(database),
   submissionRepository: new KyselySubmissionRepository(database),

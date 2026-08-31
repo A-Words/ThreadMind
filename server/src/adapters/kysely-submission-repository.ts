@@ -97,7 +97,7 @@ function toJobRow(job: BackgroundJob): Insertable<BackgroundJobsTable> {
   };
 }
 
-function toSubmission(row: Selectable<ScreenshotSubmissionsTable>): ScreenshotSubmission {
+export function toSubmission(row: Selectable<ScreenshotSubmissionsTable>): ScreenshotSubmission {
   return {
     id: row.id,
     accountId: row.account_id,

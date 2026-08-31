@@ -202,7 +202,7 @@ function toSubmission(row: Selectable<ScreenshotSubmissionsTable>): ScreenshotSu
   };
 }
 
-function toExtraction(row: Selectable<ContextExtractionsTable>): ContextExtraction {
+export function toExtraction(row: Selectable<ContextExtractionsTable>): ContextExtraction {
   return {
     id: row.id,
     accountId: row.account_id,

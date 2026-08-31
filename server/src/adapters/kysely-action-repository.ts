@@ -159,7 +159,7 @@ function toActionCardUpdate(card: ActionCard) {
   };
 }
 
-function toActionCard(row: Selectable<ActionCardsTable>): ActionCard {
+export function toActionCard(row: Selectable<ActionCardsTable>): ActionCard {
   return {
     id: row.id,
     accountId: row.account_id,
@@ -195,7 +195,7 @@ function toActionReceiptRow(receipt: ActionReceipt): Insertable<ActionReceiptsTa
   };
 }
 
-function toActionReceipt(row: Selectable<ActionReceiptsTable>): ActionReceipt {
+export function toActionReceipt(row: Selectable<ActionReceiptsTable>): ActionReceipt {
   return {
     id: row.id,
     accountId: row.account_id,

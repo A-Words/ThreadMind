@@ -201,6 +201,41 @@ describe("Submission API", () => {
   });
 });
 
+describe("Account data API", () => {
+  it("exports only the current account without storage handles or credentials", async () => {
+    const app = buildApp(undefined, { allowInsecureAccountHeader: true });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const submissionIds = { a1: randomUUID(), a2: randomUUID() };
+    for (const account of ["a1", "a2"] as const) {
+      const upload = multipartPayload({ submissionId: submissionIds[account], source: "in_app", supplementalText: `export:${account}` }, png, "image/png");
+      const created = await app.inject({
+        method: "POST", url: "/v1/submissions",
+        headers: { "x-account-id": account, "content-type": upload.contentType }, payload: upload.body,
+      });
+      assert.equal(created.statusCode, 202);
+      const sourceId = `${submissionIds[account]}:e1`;
+      const memory = await app.inject({ method: "POST", url: "/v1/memories", headers: { "x-account-id": account }, payload: {
+        subjectRefs: [`contact-${account}`], type: "profile", assertion: `Memory ${account}`,
+        epistemicStatus: "fact", confidence: 1, sensitivity: "normal", sourceRefs: [sourceId],
+        sourceEvidence: [{ sourceId, excerpt: `Evidence ${account}`, confidence: 1 }],
+      }});
+      assert.equal(memory.statusCode, 201);
+    }
+
+    const response = await app.inject({ method: "GET", url: "/v1/account/export", headers: { "x-account-id": "a1" } });
+    assert.equal(response.statusCode, 200);
+    const exported = response.json();
+    assert.equal(exported.format, "threadmind-export-v1");
+    assert.equal(exported.accountId, "a1");
+    assert.deepEqual(exported.submissions.map((item: { id: string }) => item.id), [submissionIds.a1]);
+    assert.equal(exported.submissions[0].imageObjectPath, undefined);
+    assert.equal(exported.submissions[0].imageSha256, undefined);
+    assert.deepEqual(exported.memories.map((item: { assertion: string }) => item.assertion), ["Memory a1"]);
+    assert.equal(JSON.stringify(exported).includes("Memory a2"), false);
+    await app.close();
+  });
+});
+
 function multipartPayload(
   fields: Record<string, string>,
   file: Buffer,

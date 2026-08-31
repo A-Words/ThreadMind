@@ -3,6 +3,8 @@ import multipart from "@fastify/multipart";
 import { ZodError } from "zod";
 import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../account/auth.ts";
 import type { ActionRepository } from "../adapters/action-repository.ts";
+import type { AccountExportRepository } from "../adapters/account-export-repository.ts";
+import { InMemoryAccountExportRepository } from "../adapters/in-memory-account-export-repository.ts";
 import { InMemoryActionRepository } from "../adapters/in-memory-action-repository.ts";
 import { InMemorySubmissionRepository } from "../adapters/in-memory-submission-repository.ts";
 import { InMemoryInsightRepository } from "../adapters/in-memory-insight-repository.ts";
@@ -25,6 +27,7 @@ export interface AppOptions {
   allowInsecureAccountHeader?: boolean;
   auth?: AuthConfig;
   actionRepository?: ActionRepository;
+  accountExportRepository?: AccountExportRepository;
   memoryRepository?: MemoryRepository;
   insightRepository?: InsightRepository;
   insightGenerator?: InsightGenerator;
@@ -35,6 +38,7 @@ export interface AppOptions {
 export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) {
   const app = Fastify({ logger: false });
   const actions = options.actionRepository ?? new InMemoryActionRepository(store);
+  const accountExports = options.accountExportRepository ?? new InMemoryAccountExportRepository(store);
   const memories = options.memoryRepository ?? new InMemoryMemoryRepository(store);
   const insights = options.insightRepository ?? new InMemoryInsightRepository(store);
   const insightService = new InsightService(insights, memories, options.insightGenerator ?? new EvidenceBackedInsightGenerator());
@@ -182,6 +186,7 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     const query = insightSearchInput.parse(request.query);
     return { items: await insights.list(request.accountId, query.submissionId) };
   });
+  app.get("/v1/account/export", async (request) => accountExports.create(request.accountId));
   app.get("/v1/memories", async (request) => {
     const query = memorySearchInput.parse(request.query);
     return {

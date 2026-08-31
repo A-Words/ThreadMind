@@ -195,7 +195,7 @@ function toMemoryRow(memory: MemoryRecord): Insertable<MemoryRecordsTable> {
   };
 }
 
-function toMemoryRecord(row: Selectable<MemoryRecordsTable>): MemoryRecord {
+export function toMemoryRecord(row: Selectable<MemoryRecordsTable>): MemoryRecord {
   return {
     id: row.id,
     accountId: row.account_id,

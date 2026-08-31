@@ -63,7 +63,7 @@ function toInsightRow(bundle: InsightBundle, generationKey: string): Insertable<
   };
 }
 
-function toInsightBundle(row: Selectable<InsightBundlesTable>): InsightBundle {
+export function toInsightBundle(row: Selectable<InsightBundlesTable>): InsightBundle {
   return {
     id: row.id,
     accountId: row.account_id,
