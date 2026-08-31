@@ -7,6 +7,6 @@ sealed interface ProviderResult {
     data class Failed(val code: String, val message: String) : ProviderResult
 }
 /** The only external-write boundary. Callers cannot pass a draft ActionCard. */
-interface ProviderExecutor {
+interface ProviderExecutor : ProviderInspector {
     suspend fun execute(snapshot: ConfirmedActionSnapshot): ProviderResult
 }

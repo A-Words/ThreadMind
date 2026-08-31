@@ -1,0 +1,100 @@
+package app.threadmind.provider
+
+import app.threadmind.domain.ActionCard
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class ContactFieldChange(
+    val field: String,
+    val rawContactId: String,
+    val dataId: String? = null,
+    val oldValue: String? = null,
+    val newValue: String,
+)
+
+data class ContactCandidate(
+    val contactId: String,
+    val rawContactId: String,
+    val displayName: String,
+    val accountName: String?,
+    val accountType: String?,
+    val matchedBy: String,
+    val proposedChanges: List<ContactFieldChange>,
+)
+
+data class MeetingConflict(
+    val eventId: String,
+    val title: String,
+    val startsAtEpochMillis: Long,
+    val endsAtEpochMillis: Long,
+)
+
+data class ContactFieldSnapshot(
+    val dataId: String,
+    val field: String,
+    val value: String,
+)
+
+fun buildProposedContactChanges(
+    rawContactId: String,
+    current: List<ContactFieldSnapshot>,
+    proposedFields: Map<String, String>,
+): List<ContactFieldChange> = desiredContactValues(proposedFields).mapNotNull { (field, newValue) ->
+    val existing = current.firstOrNull { it.field == field }
+    if (existing?.value == newValue) null else ContactFieldChange(
+        field = field,
+        rawContactId = rawContactId,
+        dataId = existing?.dataId,
+        oldValue = existing?.value,
+        newValue = newValue,
+    )
+}
+
+private fun desiredContactValues(fields: Map<String, String>): Map<String, String> = buildMap {
+    fields["contactMethod"]?.trim()?.takeIf(String::isNotEmpty)?.let { put(if (it.contains("@")) "email" else "phone", it) }
+    listOf("email", "phone", "company", "jobTitle", "address").forEach { field ->
+        fields[field]?.trim()?.takeIf(String::isNotEmpty)?.let { put(field, it) }
+    }
+    (fields["note"] ?: fields["notes"])?.trim()?.takeIf(String::isNotEmpty)?.let { put("note", it) }
+}
+
+sealed interface ProviderPreflightResult {
+    val cardId: String
+    val version: Int
+
+    data class Clear(
+        override val cardId: String,
+        override val version: Int,
+    ) : ProviderPreflightResult
+
+    data class MeetingConflicts(
+        override val cardId: String,
+        override val version: Int,
+        val items: List<MeetingConflict>,
+    ) : ProviderPreflightResult
+
+    data class ContactCandidates(
+        override val cardId: String,
+        override val version: Int,
+        val items: List<ContactCandidate>,
+        val createContact: Boolean,
+    ) : ProviderPreflightResult
+
+    data class ContactOverwrites(
+        override val cardId: String,
+        override val version: Int,
+        val candidate: ContactCandidate,
+        val changes: List<ContactFieldChange>,
+    ) : ProviderPreflightResult
+
+    data class Blocked(
+        override val cardId: String,
+        override val version: Int,
+        val message: String,
+    ) : ProviderPreflightResult
+}
+
+interface ProviderInspector {
+    suspend fun inspect(card: ActionCard): ProviderPreflightResult
+    fun updateFields(candidate: ContactCandidate): Map<String, String>
+}
