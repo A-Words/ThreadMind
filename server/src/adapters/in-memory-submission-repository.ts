@@ -12,6 +12,11 @@ export class InMemorySubmissionRepository implements SubmissionRepository {
     return submission?.accountId === accountId ? structuredClone(submission) : undefined;
   }
 
+  async findExtraction(accountId: string, submissionId: string) {
+    const extraction = this.store.extractions.get(submissionId);
+    return extraction?.accountId === accountId ? structuredClone(extraction) : undefined;
+  }
+
   async createWithJob(submission: ScreenshotSubmission, job: BackgroundJob): Promise<ScreenshotSubmission> {
     const existing = await this.find(submission.accountId, submission.id);
     if (existing) {

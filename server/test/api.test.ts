@@ -198,6 +198,27 @@ describe("Submission API", () => {
     assert.equal(hidden.statusCode, 404);
     const visible = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}`, headers: { "x-account-id": "a1" } });
     assert.deepEqual(visible.json(), created.json());
+    store.extractions.set(submissionId, {
+      id: randomUUID(),
+      accountId: "a1",
+      submissionId,
+      messages: [{ id: "m1", order: 0, text: "陈先生 chen@example.com", speaker: "对方", confidence: 0.91 }],
+      participants: [],
+      entities: [],
+      temporalExpressions: [],
+      actionCandidates: [],
+      evidenceSpans: [{ id: "e1", messageId: "m1", excerpt: "chen@example.com", confidence: 0.99 }],
+      warnings: ["说话人置信度较低"],
+      modelTrace: { model: "test-model", promptVersion: "test-v1" },
+      createdAt: "2026-09-01T00:00:00.000Z",
+    });
+    const extraction = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}/extraction`, headers: { "x-account-id": "a1" } });
+    assert.equal(extraction.statusCode, 200);
+    assert.equal(extraction.json().accountId, undefined);
+    assert.equal(extraction.json().messages[0].text, "陈先生 chen@example.com");
+    assert.deepEqual(extraction.json().warnings, ["说话人置信度较低"]);
+    const hiddenExtraction = await app.inject({ method: "GET", url: `/v1/submissions/${submissionId}/extraction`, headers: { "x-account-id": "a2" } });
+    assert.equal(hiddenExtraction.statusCode, 404);
     const action = await app.inject({ method: "POST", url: "/v1/action-cards", headers: { "x-account-id": "a1" }, payload: {
       cardId: randomUUID(), submissionId, type: "create_contact",
       fields: { displayName: "Chen", contactMethod: "chen@example.com", targetContactAccountId: "local" },

@@ -5,6 +5,7 @@ import { sameSubmissionContent } from "../domain/submission.ts";
 import { retryTransient, withAccount } from "../database/account-transaction.ts";
 import type { BackgroundJobsTable, ScreenshotSubmissionsTable, ThreadMindDatabase } from "../database/schema.ts";
 import type { SubmissionRepository } from "./submission-repository.ts";
+import { toExtraction } from "./kysely-submission-processing-repository.ts";
 
 export class KyselySubmissionRepository implements SubmissionRepository {
   constructor(private readonly database: Kysely<ThreadMindDatabase>) {}
@@ -18,6 +19,17 @@ export class KyselySubmissionRepository implements SubmissionRepository {
         .where("status", "!=", "deleted")
         .executeTakeFirst();
       return row ? toSubmission(row) : undefined;
+    }));
+  }
+
+  async findExtraction(accountId: string, submissionId: string) {
+    return retryTransient(() => withAccount(this.database, accountId, async (transaction) => {
+      const row = await transaction
+        .selectFrom("threadmind.context_extractions")
+        .selectAll()
+        .where("submission_id", "=", submissionId)
+        .executeTakeFirst();
+      return row ? toExtraction(row) : undefined;
     }));
   }
 

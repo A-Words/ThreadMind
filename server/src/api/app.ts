@@ -117,6 +117,12 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     const submission = await submissions.find(request.accountId, id);
     return submission ? publicSubmission(submission) : reply.code(404).send({ error: "not_found" });
   });
+  app.get<{ Params: { id: string } }>("/v1/submissions/:id/extraction", async (request, reply) => {
+    const id = submissionFieldsInput.shape.submissionId.parse(request.params.id);
+    if (!await submissions.find(request.accountId, id)) return reply.code(404).send({ error: "not_found" });
+    const extraction = await submissions.findExtraction(request.accountId, id);
+    return extraction ? publicExtraction(extraction) : reply.code(404).send({ error: "not_found" });
+  });
   app.delete<{ Params: { id: string } }>("/v1/submissions/:id", async (request, reply) => {
     const id = submissionFieldsInput.shape.submissionId.parse(request.params.id);
     const submission = await submissions.find(request.accountId, id);
@@ -252,6 +258,11 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
 
 function publicSubmission(submission: import("../domain/model.ts").ScreenshotSubmission) {
   const { imageObjectPath: _path, imageSha256: _sha256, accountId: _accountId, ...visible } = submission;
+  return visible;
+}
+
+function publicExtraction(extraction: import("../domain/model.ts").ContextExtraction) {
+  const { accountId: _accountId, ...visible } = extraction;
   return visible;
 }
 
