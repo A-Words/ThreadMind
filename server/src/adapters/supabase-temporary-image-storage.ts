@@ -29,6 +29,21 @@ export class SupabaseTemporaryImageStorage implements TemporaryImageStorage {
     if (error) throw error;
   }
 
+  async removeAccount(accountId: string): Promise<void> {
+    while (true) {
+      const { data, error } = await this.client.storage.from(this.bucket).list(accountId, {
+        limit: 100,
+        offset: 0,
+        sortBy: { column: "name", order: "asc" },
+      });
+      if (error) throw error;
+      const paths = (data ?? []).filter((item) => item.id).map((item) => `${accountId}/${item.name}`);
+      if (paths.length === 0) return;
+      const { error: removeError } = await this.client.storage.from(this.bucket).remove(paths);
+      if (removeError) throw removeError;
+    }
+  }
+
   async get(path: string): Promise<Uint8Array> {
     const { data, error } = await this.client.storage.from(this.bucket).download(path);
     if (error || !data) throw error ?? new Error("storage_object_not_found");
@@ -51,4 +66,5 @@ class UnavailableTemporaryImageStorage implements TemporaryImageStorage {
   async putIfAbsent(): Promise<never> { throw new Error(this.reason); }
   async get(): Promise<never> { throw new Error(this.reason); }
   async remove(): Promise<never> { throw new Error(this.reason); }
+  async removeAccount(): Promise<never> { throw new Error(this.reason); }
 }

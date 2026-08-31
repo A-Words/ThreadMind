@@ -4,6 +4,7 @@ export interface TemporaryImageStorage {
   putIfAbsent(path: string, bytes: Uint8Array, contentType: string, sha256: string): Promise<void>;
   get(path: string): Promise<Uint8Array>;
   remove(path: string): Promise<void>;
+  removeAccount(accountId: string): Promise<void>;
 }
 
 export class InMemoryTemporaryImageStorage implements TemporaryImageStorage {
@@ -20,6 +21,10 @@ export class InMemoryTemporaryImageStorage implements TemporaryImageStorage {
 
   async remove(path: string): Promise<void> {
     this.objects.delete(path);
+  }
+
+  async removeAccount(accountId: string): Promise<void> {
+    for (const path of this.objects.keys()) if (path.startsWith(`${accountId}/`)) this.objects.delete(path);
   }
 
   async get(path: string): Promise<Uint8Array> {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { buildApp } from "../src/api/app.js";
+import { InMemoryAuthAdmin, type AuthAdmin } from "../src/account/auth-admin.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { InMemoryTemporaryImageStorage } from "../src/adapters/temporary-image-storage.js";
 
@@ -232,6 +233,79 @@ describe("Account data API", () => {
     assert.equal(exported.submissions[0].imageSha256, undefined);
     assert.deepEqual(exported.memories.map((item: { assertion: string }) => item.assertion), ["Memory a1"]);
     assert.equal(JSON.stringify(exported).includes("Memory a2"), false);
+    await app.close();
+  });
+
+  it("deletes only the current account across storage, auth and application data", async () => {
+    const store = new InMemoryStore();
+    const temporaryImages = new InMemoryTemporaryImageStorage();
+    const authAdmin = new InMemoryAuthAdmin((accountId) => store.deleteAccount(accountId));
+    const app = buildApp(store, { allowInsecureAccountHeader: true, authAdmin, temporaryImageStorage: temporaryImages });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const submissionIds = { a1: randomUUID(), a2: randomUUID() };
+
+    for (const accountId of ["a1", "a2"] as const) {
+      const submissionId = submissionIds[accountId];
+      const upload = multipartPayload({ submissionId, source: "in_app" }, png, "image/png");
+      assert.equal((await app.inject({
+        method: "POST", url: "/v1/submissions",
+        headers: { "x-account-id": accountId, "content-type": upload.contentType }, payload: upload.body,
+      })).statusCode, 202);
+      assert.equal((await app.inject({ method: "POST", url: "/v1/memories", headers: { "x-account-id": accountId }, payload: {
+        subjectRefs: [`contact-${accountId}`], type: "profile", assertion: `Memory ${accountId}`,
+        epistemicStatus: "fact", confidence: 1, sensitivity: "normal", sourceRefs: [submissionId],
+        sourceEvidence: [{ sourceId: submissionId, excerpt: `Evidence ${accountId}`, confidence: 1 }],
+      }})).statusCode, 201);
+      const cardId = randomUUID();
+      assert.equal((await app.inject({ method: "POST", url: "/v1/action-cards", headers: { "x-account-id": accountId }, payload: {
+        cardId, submissionId, type: "create_contact",
+        fields: { displayName: accountId, contactMethod: `${accountId}@example.com`, targetContactAccountId: "local" },
+        targetAccountId: "local", evidence: [{ sourceId: submissionId, excerpt: `${accountId}@example.com`, confidence: 1 }],
+      }})).statusCode, 201);
+      assert.equal((await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/confirm`, headers: { "x-account-id": accountId }, payload: { expectedVersion: 1 } })).statusCode, 200);
+      assert.equal((await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers: { "x-account-id": accountId }, payload: {
+        receiptId: randomUUID(), status: "succeeded", targetRecordId: `contact-${accountId}`,
+      }})).statusCode, 201);
+    }
+
+    const deleted = await app.inject({ method: "DELETE", url: "/v1/account", headers: { "x-account-id": "a1" } });
+    assert.equal(deleted.statusCode, 204);
+    assert.deepEqual(authAdmin.deletedUserIds, ["a1"]);
+    assert.equal(temporaryImages.has(`a1/${submissionIds.a1}`), false);
+    assert.equal(temporaryImages.has(`a2/${submissionIds.a2}`), true);
+    assert.equal([...store.submissions.values()].some((item) => item.accountId === "a1"), false);
+    assert.equal([...store.jobs.values()].some((item) => item.accountId === "a1"), false);
+    assert.equal([...store.cards.values()].some((item) => item.accountId === "a1"), false);
+    assert.equal(store.receipts.some((item) => item.accountId === "a1"), false);
+    assert.equal([...store.memories.values()].some((item) => item.accountId === "a1"), false);
+    assert.equal([...store.insights.values()].some((item) => item.accountId === "a1"), false);
+    assert.equal([...store.submissions.values()].some((item) => item.accountId === "a2"), true);
+    assert.equal([...store.memories.values()].some((item) => item.accountId === "a2"), true);
+    assert.equal([...store.insights.values()].some((item) => item.accountId === "a2"), true);
+
+    const repeated = await app.inject({ method: "DELETE", url: "/v1/account", headers: { "x-account-id": "a1" } });
+    assert.equal(repeated.statusCode, 204);
+    assert.deepEqual(authAdmin.deletedUserIds, ["a1"]);
+    await app.close();
+  });
+
+  it("does not report account deletion success when the auth-admin step fails", async () => {
+    const store = new InMemoryStore();
+    const temporaryImages = new InMemoryTemporaryImageStorage();
+    const failingAuthAdmin: AuthAdmin = { async deleteUser() { throw new Error("auth_admin_unavailable"); } };
+    const app = buildApp(store, { allowInsecureAccountHeader: true, authAdmin: failingAuthAdmin, temporaryImageStorage: temporaryImages });
+    const submissionId = randomUUID();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const upload = multipartPayload({ submissionId, source: "in_app" }, png, "image/png");
+    assert.equal((await app.inject({
+      method: "POST", url: "/v1/submissions",
+      headers: { "x-account-id": "a1", "content-type": upload.contentType }, payload: upload.body,
+    })).statusCode, 202);
+
+    const response = await app.inject({ method: "DELETE", url: "/v1/account", headers: { "x-account-id": "a1" } });
+    assert.equal(response.statusCode, 500);
+    assert.equal(store.submissions.has(submissionId), true);
+    assert.equal(temporaryImages.has(`a1/${submissionId}`), false);
     await app.close();
   });
 });

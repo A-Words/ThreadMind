@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 import { ZodError } from "zod";
 import { authConfigFromEnv, createTokenVerifier, type AuthConfig } from "../account/auth.ts";
+import { InMemoryAuthAdmin, type AuthAdmin } from "../account/auth-admin.ts";
 import type { ActionRepository } from "../adapters/action-repository.ts";
 import type { AccountExportRepository } from "../adapters/account-export-repository.ts";
 import { InMemoryAccountExportRepository } from "../adapters/in-memory-account-export-repository.ts";
@@ -26,6 +27,7 @@ import { cardEditInput, cardInput, cardVersionInput, executionInput, insightSear
 export interface AppOptions {
   allowInsecureAccountHeader?: boolean;
   auth?: AuthConfig;
+  authAdmin?: AuthAdmin;
   actionRepository?: ActionRepository;
   accountExportRepository?: AccountExportRepository;
   memoryRepository?: MemoryRepository;
@@ -44,6 +46,7 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   const insightService = new InsightService(insights, memories, options.insightGenerator ?? new EvidenceBackedInsightGenerator());
   const submissions = options.submissionRepository ?? new InMemorySubmissionRepository(store);
   const temporaryImages = options.temporaryImageStorage ?? new InMemoryTemporaryImageStorage();
+  const authAdmin = options.authAdmin ?? new InMemoryAuthAdmin((accountId) => store.deleteAccount(accountId));
   app.register(multipart, { limits: { files: 1, fileSize: 15 * 1024 * 1024, fields: 3, parts: 4 } });
   const verifyToken = options.allowInsecureAccountHeader
     ? undefined
@@ -187,6 +190,11 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     return { items: await insights.list(request.accountId, query.submissionId) };
   });
   app.get("/v1/account/export", async (request) => accountExports.create(request.accountId));
+  app.delete("/v1/account", async (request, reply) => {
+    await temporaryImages.removeAccount(request.accountId);
+    await authAdmin.deleteUser(request.accountId);
+    return reply.code(204).send();
+  });
   app.get("/v1/memories", async (request) => {
     const query = memorySearchInput.parse(request.query);
     return {
