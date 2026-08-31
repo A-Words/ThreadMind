@@ -59,6 +59,7 @@ import app.threadmind.domain.ActionCard
 import app.threadmind.domain.ActionStatus
 import app.threadmind.domain.ActionType
 import app.threadmind.domain.actionFieldSpecs
+import app.threadmind.domain.withDeviceDefaults
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.InsightBundleResponse
 import app.threadmind.provider.ProviderPreflightResult
@@ -66,6 +67,7 @@ import app.threadmind.provider.ProviderTarget
 import app.threadmind.ui.theme.ThreadMindTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import java.time.ZoneId
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -510,7 +512,9 @@ private fun ActionCardReviewCard(
     onExecute: () -> Unit,
     onRetryReceipt: () -> Unit,
 ) {
-    var fields by remember(card.id, card.version) { mutableStateOf(card.fields) }
+    var fields by remember(card.id, card.version) {
+        mutableStateOf(withDeviceDefaults(card.type, card.fields, ZoneId.systemDefault().id))
+    }
     var targetAccountId by remember(card.id, card.version) { mutableStateOf(card.targetAccountId.orEmpty()) }
     var resolvedIssues by remember(card.id, card.version) { mutableStateOf(emptySet<String>()) }
     val editable = card.status !in setOf(ActionStatus.EXECUTING, ActionStatus.SUCCEEDED, ActionStatus.CANCELLED)

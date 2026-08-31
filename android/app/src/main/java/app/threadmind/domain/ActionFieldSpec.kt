@@ -40,3 +40,7 @@ fun actionFieldSpecs(type: ActionType): List<ActionFieldSpec> = when (type) {
         ActionFieldSpec("accountType", "联系人账户类型", providerManaged = true),
     )
 }
+
+fun withDeviceDefaults(type: ActionType, fields: Map<String, String>, deviceTimezone: String): Map<String, String> =
+    if (type == ActionType.CREATE_MEETING && fields["timezone"].isNullOrBlank()) fields + ("timezone" to deviceTimezone)
+    else fields
