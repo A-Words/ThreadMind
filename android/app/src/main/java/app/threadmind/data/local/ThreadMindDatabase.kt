@@ -41,6 +41,7 @@ data class ActionCardCacheEntity(
     val status: String,
     val payloadJson: String,
     val updatedAtEpochMillis: Long,
+    val providerReviewedVersion: Int? = null,
 )
 
 @Entity(
@@ -121,6 +122,9 @@ interface WorkflowDao {
     @Query("update action_card_cache set status = :status, payloadJson = :payloadJson, updatedAtEpochMillis = :updatedAt where accountId = :accountId and id = :cardId")
     suspend fun updateCardOutcome(accountId: String, cardId: String, status: String, payloadJson: String, updatedAt: Long)
 
+    @Query("update action_card_cache set providerReviewedVersion = :version where accountId = :accountId and id = :cardId and version = :version")
+    suspend fun markProviderReviewed(accountId: String, cardId: String, version: Int): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertPendingReceipt(entity: PendingReceiptEntity)
 
@@ -162,7 +166,7 @@ interface WorkflowDao {
 
 @Database(
     entities = [PendingSubmissionEntity::class, ActionCardCacheEntity::class, PendingReceiptEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class ThreadMindDatabase : RoomDatabase() {

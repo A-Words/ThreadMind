@@ -2,6 +2,8 @@ package app.threadmind.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import app.threadmind.data.local.ThreadMindDatabase
 import app.threadmind.data.local.WorkflowDao
 import dagger.Module
@@ -17,8 +19,16 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): ThreadMindDatabase =
-        Room.databaseBuilder(context, ThreadMindDatabase::class.java, "threadmind.db").build()
+        Room.databaseBuilder(context, ThreadMindDatabase::class.java, "threadmind.db")
+            .addMigrations(MIGRATION_1_2)
+            .build()
 
     @Provides
     fun provideWorkflowDao(database: ThreadMindDatabase): WorkflowDao = database.workflowDao()
+
+    private val MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE action_card_cache ADD COLUMN providerReviewedVersion INTEGER")
+        }
+    }
 }

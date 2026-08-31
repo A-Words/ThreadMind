@@ -94,6 +94,8 @@ class WorkflowSyncEngine @Inject constructor(
     suspend fun cacheCards(accountId: String, submissionId: String, cards: List<ActionCardResponse>) {
         val now = System.currentTimeMillis()
         dao.upsertCards(cards.map { card ->
+            val reviewedVersion = dao.card(accountId, card.id)?.providerReviewedVersion
+                ?.takeIf { it == card.version }
             ActionCardCacheEntity(
                 accountId = accountId,
                 id = card.id,
@@ -102,6 +104,7 @@ class WorkflowSyncEngine @Inject constructor(
                 status = card.status,
                 payloadJson = json.encodeToString(card),
                 updatedAtEpochMillis = now,
+                providerReviewedVersion = reviewedVersion,
             )
         })
     }

@@ -24,6 +24,7 @@ data class SubmissionProgress(
     val cards: List<ActionCard>,
     val failureCode: String? = null,
     val pendingReceipts: Map<String, ActionReceiptRequest> = emptyMap(),
+    val providerReviewedVersions: Set<String> = emptySet(),
 )
 
 data class AccountExportPayload(
@@ -47,6 +48,7 @@ interface SubmissionWorkflowRepository {
     suspend fun confirm(cardId: String, expectedVersion: Int): ActionCard
     suspend fun cancel(cardId: String)
     suspend fun reportExecution(cardId: String, request: ActionReceiptRequest)
+    suspend fun markProviderReviewed(cardId: String, version: Int)
     suspend fun deleteSubmission(submissionId: String)
     suspend fun clearMemories(): Int
     suspend fun prepareAccountExport(): AccountExportPayload
@@ -168,6 +170,11 @@ class AndroidSubmissionWorkflowRepository(
         }
     }
 
+    override suspend fun markProviderReviewed(cardId: String, version: Int) {
+        val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
+        check(dao.markProviderReviewed(accountId, cardId, version) == 1) { "卡片版本已变化，请重新检查" }
+    }
+
     override suspend fun deleteSubmission(submissionId: String) {
         val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
         val response = api.deleteSubmission(submissionId)
@@ -236,7 +243,10 @@ class AndroidSubmissionWorkflowRepository(
         val receipts = dao.pendingReceipts(accountId).associate { pending ->
             pending.actionCardId to WorkflowSyncEngine.json.decodeFromString<ActionReceiptRequest>(pending.payloadJson)
         }
-        return SubmissionProgress(submissionId, submission.status, cards, submission.failureCode, receipts)
+        val reviewed = dao.cards(accountId, submissionId)
+            .filter { it.providerReviewedVersion == it.version }
+            .mapTo(mutableSetOf()) { "${it.id}:${it.version}" }
+        return SubmissionProgress(submissionId, submission.status, cards, submission.failureCode, receipts, reviewed)
     }
 
     private fun persistUpload(submissionId: String, upload: ImageUpload): File {

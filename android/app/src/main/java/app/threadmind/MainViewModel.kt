@@ -5,8 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.threadmind.domain.ActionCard
 import app.threadmind.domain.ActionStatus
+import app.threadmind.domain.ActionType
 import app.threadmind.provider.ProviderExecutor
 import app.threadmind.provider.ProviderResult
+import app.threadmind.provider.ContactCandidate
+import app.threadmind.provider.ProviderPreflightResult
 import app.threadmind.network.ThreadMindApi
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.MemoryRevisionRequest
@@ -41,6 +44,9 @@ data class MainUiState(
     val cards: List<ActionCard> = emptyList(),
     val pendingCardIds: Set<String> = emptySet(),
     val pendingReceipts: Map<String, ActionReceiptRequest> = emptyMap(),
+    val providerReviewedVersions: Set<String> = emptySet(),
+    val pendingProviderReviewIds: Set<String> = emptySet(),
+    val providerReview: ProviderPreflightResult? = null,
     val message: String? = null,
     val backendStatus: BackendStatus = BackendStatus.IDLE,
     val backendMessage: String = "尚未连接服务端",
@@ -104,6 +110,8 @@ class MainViewModel @Inject constructor(
                 isSubmissionPending = false,
                 submissionMessage = null,
                 cards = emptyList(),
+                providerReviewedVersions = emptySet(),
+                providerReview = null,
             )
         }
     }
@@ -174,6 +182,7 @@ class MainViewModel @Inject constructor(
             submissionMessage = progressMessage(progress),
             cards = if (progress.status == "ready") progress.cards else current.cards,
             pendingReceipts = progress.pendingReceipts,
+            providerReviewedVersions = progress.providerReviewedVersions,
         )
     }
 
@@ -204,6 +213,8 @@ class MainViewModel @Inject constructor(
                             isSubmissionPending = restored != null && restored.status !in setOf("ready", "failed"),
                             cards = restored?.cards.orEmpty(),
                             pendingReceipts = restored?.pendingReceipts.orEmpty(),
+                            providerReviewedVersions = restored?.providerReviewedVersions.orEmpty(),
+                            providerReview = null,
                             submissionMessage = restored?.let(::progressMessage),
                             insights = insightResponse.items,
                             insightMessage = null,
@@ -363,6 +374,9 @@ class MainViewModel @Inject constructor(
                         cards = emptyList(),
                         pendingCardIds = emptySet(),
                         pendingReceipts = emptyMap(),
+                        providerReviewedVersions = emptySet(),
+                        pendingProviderReviewIds = emptySet(),
+                        providerReview = null,
                         memories = memoryResponse.items,
                         insights = insightResponse.items,
                         isDataOperationPending = false,
@@ -463,13 +477,20 @@ class MainViewModel @Inject constructor(
         setCardPending(cardId, true)
         viewModelScope.launch {
             runCatching { submissions.edit(cardId, card.version, fields, targetAccountId, resolvedIssues.toList()) }
-                .onSuccess { updated -> replaceCard(updated, "已保存第 ${updated.version} 版") }
+                .onSuccess { updated ->
+                    invalidateProviderReview(cardId)
+                    replaceCard(updated, "已保存第 ${updated.version} 版；请重新检查设备数据")
+                }
                 .onFailure { error -> finishCardRequest(cardId, error.message ?: "卡片保存失败") }
         }
     }
 
     fun confirm(cardId: String) {
         val card = state.value.cards.singleOrNull { it.id == cardId } ?: return
+        if (card.reviewKey() !in state.value.providerReviewedVersions) {
+            mutableState.update { it.copy(message = "确认前请先检查设备中的重复项、冲突和目标账户") }
+            return
+        }
         setCardPending(cardId, true)
         viewModelScope.launch {
             runCatching { submissions.confirm(card.id, card.version) }
@@ -509,6 +530,10 @@ class MainViewModel @Inject constructor(
     suspend fun execute(cardId: String) {
         val card = state.value.cards.single { it.id == cardId }
         require(card.status == ActionStatus.CONFIRMED)
+        if (card.reviewKey() !in state.value.providerReviewedVersions) {
+            mutableState.update { it.copy(message = "设备数据预检已失效，请重新检查后再执行") }
+            return
+        }
         if (cardId in state.value.pendingReceipts) {
             mutableState.update { it.copy(message = "执行回执尚未同步，请勿再次写入系统") }
             return
@@ -553,6 +578,105 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun preflightProvider(cardId: String) {
+        val card = state.value.cards.singleOrNull { it.id == cardId } ?: return
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    pendingProviderReviewIds = it.pendingProviderReviewIds + cardId,
+                    providerReview = null,
+                    message = "正在读取设备中的相关记录…",
+                )
+            }
+            runCatching { providerExecutor.inspect(card) }
+                .onSuccess { result ->
+                    if (result is ProviderPreflightResult.Clear) approveProviderReview(result.cardId, result.version, "设备数据检查完成")
+                    else mutableState.update {
+                        it.copy(
+                            pendingProviderReviewIds = it.pendingProviderReviewIds - cardId,
+                            providerReview = result,
+                            message = if (result is ProviderPreflightResult.Blocked) result.message else null,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            pendingProviderReviewIds = it.pendingProviderReviewIds - cardId,
+                            message = error.message ?: "设备数据检查失败",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun approveProviderReview() {
+        val review = state.value.providerReview ?: return
+        approveProviderReview(review.cardId, review.version, "已明确处理设备数据冲突")
+    }
+
+    private fun approveProviderReview(cardId: String, version: Int, message: String) {
+        val card = state.value.cards.singleOrNull { it.id == cardId && it.version == version } ?: return
+        viewModelScope.launch {
+            runCatching { submissions.markProviderReviewed(cardId, version) }
+                .onSuccess {
+                    mutableState.update {
+                        it.copy(
+                            providerReviewedVersions = it.providerReviewedVersions + card.reviewKey(),
+                            pendingProviderReviewIds = it.pendingProviderReviewIds - cardId,
+                            providerReview = null,
+                            message = message,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            pendingProviderReviewIds = it.pendingProviderReviewIds - cardId,
+                            providerReview = null,
+                            message = error.message ?: "无法保存设备预检结果",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun convertContactToUpdate(candidate: ContactCandidate) {
+        val review = state.value.providerReview as? ProviderPreflightResult.ContactCandidates ?: return
+        val card = state.value.cards.singleOrNull { it.id == review.cardId && it.version == review.version } ?: return
+        if (candidate.proposedChanges.isEmpty()) {
+            mutableState.update { it.copy(message = "该联系人已包含拟议信息，没有可更新字段") }
+            return
+        }
+        setCardPending(card.id, true)
+        viewModelScope.launch {
+            runCatching {
+                submissions.edit(
+                    cardId = card.id,
+                    expectedVersion = card.version,
+                    fields = providerExecutor.updateFields(candidate),
+                    targetAccountId = candidate.accountName ?: card.targetAccountId.orEmpty(),
+                    resolvedValidationIssues = card.validationIssues,
+                    type = ActionType.UPDATE_CONTACT,
+                )
+            }.onSuccess { updated ->
+                invalidateProviderReview(card.id)
+                mutableState.update { it.copy(providerReview = null) }
+                replaceCard(updated, "已改为更新所选联系人；请检查字段差异并重新预检")
+            }.onFailure { error -> finishCardRequest(card.id, error.message ?: "无法改为更新联系人") }
+        }
+    }
+
+    fun dismissProviderReview() = mutableState.update { it.copy(providerReview = null) }
+
+    fun providerReadPermissionDenied() = mutableState.update {
+        it.copy(message = "未授予读取权限，无法检查重复项或冲突，也不会执行写入")
+    }
+
+    private fun invalidateProviderReview(cardId: String) = mutableState.update {
+        it.copy(providerReviewedVersions = it.providerReviewedVersions.filterNot { key -> key.startsWith("$cardId:") }.toSet())
+    }
+
     private suspend fun recordOutcome(cardId: String, request: ActionReceiptRequest, status: ActionStatus, successMessage: String) {
         val report = runCatching { submissions.reportExecution(cardId, request) }
         val refreshed = if (report.isSuccess && status == ActionStatus.SUCCEEDED) runCatching { api.listInsights() } else null
@@ -589,3 +713,5 @@ class MainViewModel @Inject constructor(
         const val MAX_POLL_ATTEMPTS = 60
     }
 }
+
+private fun ActionCard.reviewKey() = "$id:$version"

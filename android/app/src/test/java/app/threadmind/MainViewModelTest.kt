@@ -27,6 +27,10 @@ import app.threadmind.network.SubmissionWorkflowRepository
 import app.threadmind.network.ThreadMindApi
 import app.threadmind.provider.ProviderExecutor
 import app.threadmind.provider.ProviderResult
+import app.threadmind.provider.ContactCandidate
+import app.threadmind.provider.ContactFieldChange
+import app.threadmind.provider.MeetingConflict
+import app.threadmind.provider.ProviderPreflightResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -100,6 +104,13 @@ class MainViewModelTest {
 
         viewModel.confirm("card-1")
         runCurrent()
+        assertEquals(ActionStatus.READY, viewModel.state.value.cards.single().status)
+        assertEquals("确认前请先检查设备中的重复项、冲突和目标账户", viewModel.state.value.message)
+
+        viewModel.preflightProvider("card-1")
+        runCurrent()
+        viewModel.confirm("card-1")
+        runCurrent()
         assertEquals(ActionStatus.CONFIRMED, viewModel.state.value.cards.single().status)
 
         viewModel.execute("card-1")
@@ -119,6 +130,7 @@ class MainViewModelTest {
                 status = "ready",
                 cards = listOf(restoredCard),
                 pendingReceipts = mapOf("card-1" to pendingReceipt),
+                providerReviewedVersions = setOf("card-1:1"),
             ),
         )
         val provider = FakeProviderExecutor()
@@ -196,6 +208,49 @@ class MainViewModelTest {
         assertEquals(true, submissions.accountDeleted)
         assertEquals(true, viewModel.state.value.accountDeleted)
     }
+
+    @Test fun `provider conflict requires explicit second approval for the same card version`() = runTest(dispatcher) {
+        val provider = FakeProviderExecutor { card ->
+            ProviderPreflightResult.MeetingConflicts(
+                card.id,
+                card.version,
+                listOf(MeetingConflict("event-1", "已有会议", 1_000, 2_000)),
+            )
+        }
+        val submissions = FakeSubmissionWorkflowRepository()
+        val viewModel = MainViewModel(provider, FakeThreadMindApi(), submissions)
+        viewModel.showCards(listOf(actionCard().copy(type = ActionType.CREATE_MEETING)))
+
+        viewModel.preflightProvider("card-1")
+        runCurrent()
+        assertEquals(true, viewModel.state.value.providerReview is ProviderPreflightResult.MeetingConflicts)
+        assertEquals(emptySet<String>(), viewModel.state.value.providerReviewedVersions)
+
+        viewModel.approveProviderReview()
+        runCurrent()
+        assertEquals(setOf("card-1:1"), viewModel.state.value.providerReviewedVersions)
+        assertEquals(setOf("card-1:1"), submissions.reviewedVersions)
+    }
+
+    @Test fun `duplicate contact selection creates a new update-contact version`() = runTest(dispatcher) {
+        val change = ContactFieldChange("email", "raw-1", oldValue = null, newValue = "chen@example.com")
+        val candidate = ContactCandidate("contact-1", "raw-1", "Chen", "local", null, "姓名匹配，需人工确认", listOf(change))
+        val provider = FakeProviderExecutor { card ->
+            ProviderPreflightResult.ContactCandidates(card.id, card.version, listOf(candidate), createContact = true)
+        }
+        val viewModel = MainViewModel(provider, FakeThreadMindApi(), FakeSubmissionWorkflowRepository())
+        viewModel.showCards(listOf(actionCard()))
+
+        viewModel.preflightProvider("card-1")
+        runCurrent()
+        viewModel.convertContactToUpdate(candidate)
+        runCurrent()
+
+        assertEquals(ActionType.UPDATE_CONTACT, viewModel.state.value.cards.single().type)
+        assertEquals(2, viewModel.state.value.cards.single().version)
+        assertEquals("contact-1", viewModel.state.value.cards.single().fields["targetContactId"])
+        assertEquals(emptySet<String>(), viewModel.state.value.providerReviewedVersions)
+    }
 }
 
 private class FakeSubmissionWorkflowRepository(
@@ -205,6 +260,7 @@ private class FakeSubmissionWorkflowRepository(
     val deletedSubmissionIds = mutableListOf<String>()
     var writtenExportUri: Uri? = null
     var accountDeleted = false
+    val reviewedVersions = mutableSetOf<String>()
 
     override suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String) = error("unused")
     override suspend fun refresh(submissionId: String): SubmissionProgress = error("unused")
@@ -216,11 +272,15 @@ private class FakeSubmissionWorkflowRepository(
         targetAccountId: String,
         resolvedValidationIssues: List<String>,
         type: ActionType?,
-    ) = ActionCardPolicy.edit(actionCard().copy(version = expectedVersion), fields, resolvedValidationIssues.toSet())
-        .copy(targetAccountId = targetAccountId, type = type ?: actionCard().type)
+    ) = ActionCardPolicy.edit(
+        actionCard().copy(version = expectedVersion, type = type ?: actionCard().type),
+        fields,
+        resolvedValidationIssues.toSet(),
+    ).copy(targetAccountId = targetAccountId)
     override suspend fun confirm(cardId: String, expectedVersion: Int) = ActionCardPolicy.confirm(actionCard().copy(version = expectedVersion))
     override suspend fun cancel(cardId: String) = Unit
     override suspend fun reportExecution(cardId: String, request: ActionReceiptRequest) { receipts += request }
+    override suspend fun markProviderReviewed(cardId: String, version: Int) { reviewedVersions += "$cardId:$version" }
     override suspend fun deleteSubmission(submissionId: String) { deletedSubmissionIds += submissionId }
     override suspend fun clearMemories(): Int = 1
     override suspend fun prepareAccountExport() = AccountExportPayload("request-1", "threadmind-export.json", "{\"format\":\"threadmind-export-v1\"}")
@@ -334,11 +394,20 @@ private fun insightBundle() = InsightBundleResponse(
     generatedAt = "2026-08-31T00:00:00Z",
 )
 
-private class FakeProviderExecutor : ProviderExecutor {
+private class FakeProviderExecutor(
+    private val inspection: (ActionCard) -> ProviderPreflightResult = { ProviderPreflightResult.Clear(it.id, it.version) },
+) : ProviderExecutor {
     var executionCount = 0
 
     override suspend fun execute(snapshot: ConfirmedActionSnapshot): ProviderResult {
         executionCount += 1
         return ProviderResult.Succeeded("record-1")
     }
+
+    override suspend fun inspect(card: ActionCard) = inspection(card)
+
+    override fun updateFields(candidate: ContactCandidate): Map<String, String> = mapOf(
+        "targetContactId" to candidate.contactId,
+        "changes" to "[]",
+    )
 }

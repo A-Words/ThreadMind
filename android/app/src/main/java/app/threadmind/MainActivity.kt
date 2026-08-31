@@ -60,6 +60,7 @@ import app.threadmind.domain.ActionStatus
 import app.threadmind.domain.ActionType
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.InsightBundleResponse
+import app.threadmind.provider.ProviderPreflightResult
 import app.threadmind.ui.theme.ThreadMindTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -148,7 +149,7 @@ private fun ThreadMindScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    var pendingCardId by remember { mutableStateOf<String?>(null) }
+    var pendingProviderPermission by remember { mutableStateOf<Pair<String, ProviderPermissionAction>?>(null) }
     var memoryToDelete by remember { mutableStateOf<MemoryRecordResponse?>(null) }
     var confirmSubmissionDelete by remember { mutableStateOf(false) }
     var confirmMemoryClear by remember { mutableStateOf(false) }
@@ -170,11 +171,17 @@ private fun ThreadMindScreen(
         state.pendingExport?.let { exportDocument.launch(it.fileName) }
     }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        val cardId = pendingCardId
-        pendingCardId = null
-        if (cardId != null) {
-            if (grants.values.all { it }) scope.launch { viewModel.execute(cardId) }
-            else viewModel.permissionDenied(cardId)
+        val pending = pendingProviderPermission
+        pendingProviderPermission = null
+        if (pending != null) {
+            if (grants.values.all { it }) {
+                if (pending.second == ProviderPermissionAction.PREFLIGHT) viewModel.preflightProvider(pending.first)
+                else scope.launch { viewModel.execute(pending.first) }
+            } else if (pending.second == ProviderPermissionAction.PREFLIGHT) {
+                viewModel.providerReadPermissionDenied()
+            } else {
+                viewModel.permissionDenied(pending.first)
+            }
         }
     }
     Scaffold(
@@ -336,11 +343,20 @@ private fun ThreadMindScreen(
                     card = card,
                     isPending = card.id in state.pendingCardIds,
                     receiptPending = card.id in state.pendingReceipts,
+                    providerReviewed = "${card.id}:${card.version}" in state.providerReviewedVersions,
+                    providerReviewPending = card.id in state.pendingProviderReviewIds,
                     onSave = { fields, target, issues -> viewModel.editCard(card.id, fields, target, issues) },
                     onConfirm = { viewModel.confirm(card.id) },
                     onCancel = { viewModel.cancelCard(card.id) },
+                    onPreflight = {
+                        pendingProviderPermission = card.id to ProviderPermissionAction.PREFLIGHT
+                        permissions.launch(
+                            if (card.type == ActionType.CREATE_MEETING) arrayOf(Manifest.permission.READ_CALENDAR)
+                            else arrayOf(Manifest.permission.READ_CONTACTS),
+                        )
+                    },
                     onExecute = {
-                        pendingCardId = card.id
+                        pendingProviderPermission = card.id to ProviderPermissionAction.EXECUTE
                         permissions.launch(
                             if (card.type == ActionType.CREATE_MEETING) arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
                             else arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS),
@@ -427,6 +443,14 @@ private fun ThreadMindScreen(
             dismissButton = { TextButton(onClick = { confirmAccountDelete = false }) { Text("取消") } },
         )
     }
+    state.providerReview?.let { review ->
+        ProviderReviewDialog(
+            review = review,
+            onApprove = viewModel::approveProviderReview,
+            onConvert = viewModel::convertContactToUpdate,
+            onDismiss = viewModel::dismissProviderReview,
+        )
+    }
 }
 
 @Composable
@@ -434,9 +458,12 @@ private fun ActionCardReviewCard(
     card: ActionCard,
     isPending: Boolean,
     receiptPending: Boolean,
+    providerReviewed: Boolean,
+    providerReviewPending: Boolean,
     onSave: (Map<String, String>, String, Set<String>) -> Unit,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
+    onPreflight: () -> Unit,
     onExecute: () -> Unit,
     onRetryReceipt: () -> Unit,
 ) {
@@ -486,6 +513,16 @@ private fun ActionCardReviewCard(
             }
             card.blockers.filterNot { it.startsWith("validation:") }.forEach { Text("尚不能确认：$it") }
             card.evidence.forEach { Text("依据：${it.excerpt} (${(it.confidence * 100).toInt()}%)") }
+            Button(onClick = onPreflight, enabled = !isPending && !providerReviewPending) {
+                Text(
+                    when {
+                        providerReviewPending -> "检查中…"
+                        providerReviewed -> "重新检查设备数据"
+                        else -> "检查设备数据"
+                    },
+                )
+            }
+            Text(if (providerReviewed) "当前版本已完成 Provider 预检" else "确认前必须检查重复项、冲突和目标记录")
             val changed = fields != card.fields || targetAccountId != card.targetAccountId.orEmpty() || resolvedIssues.isNotEmpty()
             if (editable) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -493,13 +530,13 @@ private fun ActionCardReviewCard(
                         onClick = { onSave(fields, targetAccountId.trim(), resolvedIssues) },
                         enabled = !isPending && targetAccountId.isNotBlank() && changed,
                     ) { Text("保存修改") }
-                    Button(onClick = onConfirm, enabled = !isPending && card.status == ActionStatus.READY && !changed) {
+                    Button(onClick = onConfirm, enabled = !isPending && providerReviewed && card.status == ActionStatus.READY && !changed) {
                         Text("确认当前版本")
                     }
                 }
                 TextButton(onClick = onCancel, enabled = !isPending) { Text("取消这张卡片") }
             }
-            Button(onClick = onExecute, enabled = !isPending && !receiptPending && card.status == ActionStatus.CONFIRMED) {
+            Button(onClick = onExecute, enabled = !isPending && !receiptPending && providerReviewed && card.status == ActionStatus.CONFIRMED) {
                 Text("授权并写入系统")
             }
             if (receiptPending) {
@@ -509,6 +546,64 @@ private fun ActionCardReviewCard(
         }
     }
 }
+
+@Composable
+private fun ProviderReviewDialog(
+    review: ProviderPreflightResult,
+    onApprove: () -> Unit,
+    onConvert: (app.threadmind.provider.ContactCandidate) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val title = when (review) {
+        is ProviderPreflightResult.MeetingConflicts -> "发现疑似重复会议"
+        is ProviderPreflightResult.ContactCandidates -> if (review.createContact) "发现可能重复的联系人" else "请选择唯一联系人"
+        is ProviderPreflightResult.ContactOverwrites -> "确认联系人字段差异"
+        is ProviderPreflightResult.Blocked -> "设备数据检查未通过"
+        is ProviderPreflightResult.Clear -> "设备数据检查完成"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (review) {
+                    is ProviderPreflightResult.MeetingConflicts -> review.items.forEach {
+                        Text("${it.title} · ${java.time.Instant.ofEpochMilli(it.startsAtEpochMillis)} — ${java.time.Instant.ofEpochMilli(it.endsAtEpochMillis)}")
+                    }
+                    is ProviderPreflightResult.ContactCandidates -> review.items.forEach { candidate ->
+                        Text("${candidate.displayName.ifBlank { "未命名联系人" }} · ${candidate.accountName ?: "本地账户"} · ${candidate.matchedBy}")
+                        candidate.proposedChanges.forEach { change ->
+                            Text("${change.field}：${change.oldValue ?: "未设置"} → ${change.newValue}")
+                        }
+                        TextButton(
+                            onClick = { onConvert(candidate) },
+                            enabled = candidate.proposedChanges.isNotEmpty(),
+                        ) { Text("改为更新此联系人") }
+                    }
+                    is ProviderPreflightResult.ContactOverwrites -> review.changes.forEach { change ->
+                        Text("${change.field}：${change.oldValue ?: "未设置"} → ${change.newValue}")
+                    }
+                    is ProviderPreflightResult.Blocked -> Text(review.message)
+                    is ProviderPreflightResult.Clear -> Text("没有发现需要额外确认的问题。")
+                }
+            }
+        },
+        confirmButton = {
+            when (review) {
+                is ProviderPreflightResult.MeetingConflicts -> Button(onClick = onApprove) { Text("仍然保留本次会议") }
+                is ProviderPreflightResult.ContactCandidates -> if (review.createContact) {
+                    Button(onClick = onApprove) { Text("仍然创建新联系人") }
+                }
+                is ProviderPreflightResult.ContactOverwrites -> Button(onClick = onApprove) { Text("确认覆盖这些字段") }
+                is ProviderPreflightResult.Blocked,
+                is ProviderPreflightResult.Clear -> Unit
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("返回") } },
+    )
+}
+
+private enum class ProviderPermissionAction { PREFLIGHT, EXECUTE }
 
 @Composable
 private fun MemoryCard(
