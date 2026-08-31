@@ -61,6 +61,10 @@ describe("Action Card invariants", () => {
     const result = recordExecution(confirmCard(readyCard()), { status: "failed", errorCode: "permission_denied" }, []);
     assert.equal(result.receipt.targetRecordId, undefined);
     assert.equal(result.card.status, "failed");
+    const cancelled = recordExecution(confirmCard(readyCard()), { status: "cancelled", errorCode: "permission_denied" }, []);
+    assert.equal(cancelled.receipt.status, "cancelled");
+    assert.equal(cancelled.card.status, "failed");
+    assert.equal(confirmCard(cancelled.card).status, "confirmed");
   });
 });
 

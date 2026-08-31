@@ -595,7 +595,10 @@ private fun ActionCardReviewCard(
                         onClick = { onSave(fields, targetAccountId.trim(), resolvedIssues) },
                         enabled = !isPending && targetAccountId.isNotBlank() && changed,
                     ) { Text("保存修改") }
-                    Button(onClick = onConfirm, enabled = !isPending && providerReviewed && card.status == ActionStatus.READY && !changed) {
+                    Button(
+                        onClick = onConfirm,
+                        enabled = !isPending && providerReviewed && card.status in setOf(ActionStatus.READY, ActionStatus.FAILED) && !changed,
+                    ) {
                         Text("确认当前版本")
                     }
                 }

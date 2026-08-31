@@ -540,7 +540,7 @@ class MainViewModel @Inject constructor(
             errorCode = "permission_denied",
             errorMessage = "用户未授予本次系统写入所需权限",
         )
-        viewModelScope.launch { recordOutcome(cardId, request, ActionStatus.CANCELLED, "未授予权限，未写入系统") }
+        viewModelScope.launch { recordOutcome(cardId, request, ActionStatus.FAILED, "未授予权限，未写入系统；授权后可重新确认") }
     }
 
     suspend fun execute(cardId: String) {

@@ -124,6 +124,25 @@ class MainViewModelTest {
         assertEquals("insight-1", viewModel.state.value.insights.single().id)
     }
 
+    @Test fun `permission cancellation keeps the card recoverable for explicit reconfirmation`() = runTest(dispatcher) {
+        val submissions = FakeSubmissionWorkflowRepository()
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), submissions)
+        viewModel.showCards(listOf(actionCard()))
+        viewModel.preflightProvider("card-1")
+        runCurrent()
+        viewModel.confirm("card-1")
+        runCurrent()
+
+        viewModel.permissionDenied("card-1")
+        runCurrent()
+        assertEquals("cancelled", submissions.receipts.single().status)
+        assertEquals(ActionStatus.FAILED, viewModel.state.value.cards.single().status)
+
+        viewModel.confirm("card-1")
+        runCurrent()
+        assertEquals(ActionStatus.CONFIRMED, viewModel.state.value.cards.single().status)
+    }
+
     @Test fun `backend check restores latest review and pending receipt`() = runTest(dispatcher) {
         val pendingReceipt = ActionReceiptRequest("receipt-1", "succeeded", targetRecordId = "record-1")
         val restoredCard = ActionCardPolicy.confirm(actionCard())
