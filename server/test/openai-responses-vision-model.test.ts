@@ -26,13 +26,17 @@ describe("OpenAI Responses vision adapter", () => {
     assert.equal(body.text.format.type, "json_schema");
     assert.equal(body.text.format.strict, true);
     assert.equal(body.text.format.schema.additionalProperties, false);
-    assert.equal(body.input[0].content[1].image_url, "data:image/png;base64,AQID");
-    assert.match(body.input[0].content[0].text, /这是客户陈先生/);
+    assert.equal(body.input[0].role, "developer");
+    assert.match(body.input[0].content[0].text, /untrusted data/);
+    assert.equal(body.input[1].role, "user");
+    assert.equal(body.input[1].content[0].image_url, "data:image/png;base64,AQID");
+    assert.match(body.input[1].content[1].text, /这是客户陈先生/);
+    assert.equal(body.input[0].content[0].text.includes("这是客户陈先生"), false);
     assert.equal(JSON.stringify(body).includes("secret-key"), false);
     assert.deepEqual(output.actionCandidates[0].fields, { displayName: "陈先生", contactMethod: "chen@example.com" });
     assert.deepEqual(output.actionCandidates[0].fieldConfidence, { displayName: 0.95, contactMethod: 0.99 });
     assert.equal(output.modelTrace.model, "configured-model");
-    assert.equal(output.modelTrace.promptVersion, "threadmind-extraction-v1");
+    assert.equal(output.modelTrace.promptVersion, "threadmind-extraction-v2");
   });
 
   it("rejects provider failures without exposing the response body", async () => {
