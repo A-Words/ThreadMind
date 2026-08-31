@@ -72,9 +72,23 @@ describe("Action Card API", () => {
     const created = await app.inject({ method: "POST", url: "/v1/memories", headers: { "x-account-id": "a1" }, payload: {
       subjectRefs: ["contact-1"], type: "profile", assertion: "Works at A", epistemicStatus: "inference",
       confidence: 0.6, sensitivity: "normal", sourceRefs: ["message-1"],
+      sourceEvidence: [{ sourceId: "message-1", excerpt: "Chen works at A", confidence: 0.9 }],
     }});
     assert.equal(created.statusCode, 201);
     const memory = created.json();
+    const second = await app.inject({ method: "POST", url: "/v1/memories", headers: { "x-account-id": "a1" }, payload: {
+      subjectRefs: ["contact-2"], type: "event", assertion: "Dinner next Friday", epistemicStatus: "fact",
+      confidence: 0.9, sensitivity: "normal", sourceRefs: ["message-2"],
+      sourceEvidence: [{ sourceId: "message-2", excerpt: "Let's have dinner next Friday", confidence: 0.95 }],
+    }});
+    assert.equal(second.statusCode, 201);
+    const searched = await app.inject({ method: "GET", url: "/v1/memories?q=chen", headers: { "x-account-id": "a1" } });
+    assert.deepEqual(searched.json().items.map((item: { id: string }) => item.id), [memory.id]);
+    const filtered = await app.inject({ method: "GET", url: "/v1/memories?subjectRef=contact-2&type=event", headers: { "x-account-id": "a1" } });
+    assert.deepEqual(filtered.json().items.map((item: { id: string }) => item.id), [second.json().id]);
+    const future = await app.inject({ method: "GET", url: "/v1/memories?from=2999-01-01T00%3A00%3A00.000Z", headers: { "x-account-id": "a1" } });
+    assert.deepEqual(future.json().items, []);
+    assert.equal(memory.sourceEvidence[0].excerpt, "Chen works at A");
     const hidden = await app.inject({ method: "PATCH", url: `/v1/memories/${memory.id}`, headers: { "x-account-id": "a2" }, payload: { assertion: "Works at B", sourceRef: "correction-1" } });
     assert.equal(hidden.statusCode, 404);
     const revised = await app.inject({ method: "PATCH", url: `/v1/memories/${memory.id}`, headers: { "x-account-id": "a1" }, payload: { assertion: "Works at B", sourceRef: "correction-1" } });
@@ -83,7 +97,7 @@ describe("Action Card API", () => {
     const removed = await app.inject({ method: "DELETE", url: `/v1/memories/${revised.json().id}`, headers: { "x-account-id": "a1" } });
     assert.equal(removed.statusCode, 204);
     const listed = await app.inject({ method: "GET", url: "/v1/memories", headers: { "x-account-id": "a1" } });
-    assert.deepEqual(listed.json().items, []);
+    assert.deepEqual(listed.json().items.map((item: { id: string }) => item.id), [second.json().id]);
     await app.close();
   });
 });

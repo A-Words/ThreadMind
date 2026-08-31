@@ -1,5 +1,5 @@
 import type { ColumnType } from "kysely";
-import type { ActionCard, ActionReceipt, BackgroundJob, ContextExtraction, EpistemicStatus, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
+import type { ActionCard, ActionReceipt, BackgroundJob, ContextExtraction, EpistemicStatus, EvidenceRef, MemoryRecord, ScreenshotSubmission } from "../domain/model.ts";
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | string>;
@@ -107,6 +107,7 @@ export interface MemoryRecordsTable {
   confidence: Confidence;
   sensitivity: MemoryRecord["sensitivity"];
   source_refs: JsonStringArray;
+  source_evidence: JsonArray<EvidenceRef>;
   version: number;
   supersedes_id: string | null;
   status: MemoryRecord["status"];

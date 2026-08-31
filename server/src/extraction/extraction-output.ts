@@ -110,17 +110,29 @@ export function validateExtractionOutput(
     status: "draft",
     blockers: [],
   }));
-  const memories = output.memoryCandidates.map((candidate, index) => createMemory({
-    id: stableUuid(context.submissionId, `memory:${index}:${candidate.id}`),
-    accountId: context.accountId,
-    subjectRefs: candidate.subjectRefs,
-    type: candidate.type,
-    assertion: candidate.assertion,
-    epistemicStatus: candidate.epistemicStatus,
-    confidence: candidate.confidence,
-    sensitivity: candidate.sensitivity,
-    sourceRefs: candidate.evidenceRefs.map((evidenceId) => `${context.submissionId}:${evidenceId}`),
-  }, now));
+  const memories = output.memoryCandidates.map((candidate, index) => {
+    const sourceEvidence = candidate.evidenceRefs.map((evidenceId) => {
+      const evidence = evidenceById.get(evidenceId)!;
+      return {
+        sourceId: `${context.submissionId}:${evidenceId}`,
+        messageId: evidence.messageId,
+        excerpt: evidence.excerpt,
+        confidence: evidence.confidence,
+      };
+    });
+    return createMemory({
+      id: stableUuid(context.submissionId, `memory:${index}:${candidate.id}`),
+      accountId: context.accountId,
+      subjectRefs: candidate.subjectRefs,
+      type: candidate.type,
+      assertion: candidate.assertion,
+      epistemicStatus: candidate.epistemicStatus,
+      confidence: candidate.confidence,
+      sensitivity: candidate.sensitivity,
+      sourceRefs: sourceEvidence.map((evidence) => evidence.sourceId),
+      sourceEvidence,
+    }, now);
+  });
   return { extraction, cards, memories };
 }
 

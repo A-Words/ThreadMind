@@ -155,6 +155,7 @@ function toMemoryRow(memory: MemoryRecord): Insertable<MemoryRecordsTable> {
     confidence: memory.confidence,
     sensitivity: memory.sensitivity,
     source_refs: JSON.stringify(memory.sourceRefs),
+    source_evidence: JSON.stringify(memory.sourceEvidence),
     version: memory.version,
     supersedes_id: memory.supersedesId ?? null,
     status: memory.status,

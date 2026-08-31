@@ -1,22 +1,36 @@
-import { type Insertable, type Kysely, type Selectable } from "kysely";
+import { type Insertable, type Kysely, type Selectable, sql } from "kysely";
 import { deleteMemory, reviseMemory } from "../domain/memory.ts";
 import type { MemoryRecord } from "../domain/model.ts";
 import { retryTransient, withAccount } from "../database/account-transaction.ts";
 import type { ThreadMindDatabase, MemoryRecordsTable } from "../database/schema.ts";
-import type { MemoryRepository } from "./memory-repository.ts";
+import type { MemoryRepository, MemorySearchQuery } from "./memory-repository.ts";
 
 export class KyselyMemoryRepository implements MemoryRepository {
   constructor(private readonly database: Kysely<ThreadMindDatabase>) {}
 
-  async listActive(accountId: string): Promise<MemoryRecord[]> {
+  async listActive(accountId: string, query: MemorySearchQuery = {}): Promise<MemoryRecord[]> {
     return retryTransient(() => withAccount(this.database, accountId, async (trx) => {
-      const rows = await trx
+      let selection = trx
         .selectFrom("threadmind.memory_records")
         .selectAll()
-        .where("status", "=", "active")
+        .where("status", "=", "active");
+      if (query.search?.trim()) {
+        const pattern = `%${query.search.trim()}%`;
+        selection = selection.where((expression) => expression.or([
+          expression("assertion", "ilike", pattern),
+          sql<boolean>`${sql.ref("source_evidence")}::text ilike ${pattern}`,
+        ]));
+      }
+      if (query.subjectRef) {
+        selection = selection.where(sql<boolean>`${sql.ref("subject_refs")} @> ${JSON.stringify([query.subjectRef])}::jsonb`);
+      }
+      if (query.type) selection = selection.where("memory_type", "=", query.type);
+      if (query.createdFrom) selection = selection.where("created_at", ">=", new Date(query.createdFrom));
+      if (query.createdTo) selection = selection.where("created_at", "<=", new Date(query.createdTo));
+      const rows = await selection
         .orderBy("updated_at", "desc")
         .orderBy("id", "desc")
-        .limit(100)
+        .limit(query.limit ?? 100)
         .execute();
       return rows.map(toMemoryRecord);
     }));
@@ -121,6 +135,7 @@ function toMemoryRow(memory: MemoryRecord): Insertable<MemoryRecordsTable> {
     confidence: memory.confidence,
     sensitivity: memory.sensitivity,
     source_refs: JSON.stringify(memory.sourceRefs),
+    source_evidence: JSON.stringify(memory.sourceEvidence),
     version: memory.version,
     supersedes_id: memory.supersedesId ?? null,
     status: memory.status,
@@ -140,6 +155,7 @@ function toMemoryRecord(row: Selectable<MemoryRecordsTable>): MemoryRecord {
     confidence: Number(row.confidence),
     sensitivity: row.sensitivity,
     sourceRefs: row.source_refs,
+    sourceEvidence: row.source_evidence,
     version: row.version,
     ...(row.supersedes_id ? { supersedesId: row.supersedes_id } : {}),
     status: row.status,

@@ -55,12 +55,17 @@ describe("Action Card invariants", () => {
 
 describe("Memory and insight invariants", () => {
   it("versions corrections and filters deleted and superseded records", () => {
-    const first = createMemory({ accountId: "account-1", subjectRefs: ["contact-1"], type: "profile", assertion: "Works at A", epistemicStatus: "inference", confidence: 0.6, sensitivity: "normal", sourceRefs: ["message-1"] });
+    const first = createMemory({
+      accountId: "account-1", subjectRefs: ["contact-1"], type: "profile", assertion: "Works at A",
+      epistemicStatus: "inference", confidence: 0.6, sensitivity: "normal", sourceRefs: ["message-1"],
+      sourceEvidence: [{ sourceId: "message-1", excerpt: "Chen works at A", confidence: 0.9 }],
+    });
     const [superseded, corrected] = reviseMemory(first, "Works at B", "user-correction-1");
     const deleted = deleteMemory(corrected);
     assert.deepEqual(recallable([superseded, deleted], "account-1"), []);
     assert.equal(corrected.epistemicStatus, "fact");
     assert.equal(corrected.supersedesId, first.id);
+    assert.equal(corrected.sourceEvidence.at(-1)?.excerpt, "Works at B");
   });
 
   it("requires successful action receipts and evidence for formal insights", () => {

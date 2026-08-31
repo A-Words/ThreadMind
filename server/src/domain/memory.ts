@@ -7,6 +7,12 @@ export function createMemory(
   now = new Date(),
 ): MemoryRecord {
   invariant(input.sourceRefs.length > 0, "memory_source_required", "Memory must have a traceable source");
+  invariant(input.sourceEvidence.length > 0, "memory_evidence_required", "Memory must have displayable source evidence");
+  invariant(
+    input.sourceEvidence.every((evidence) => input.sourceRefs.includes(evidence.sourceId) && evidence.excerpt.trim().length > 0),
+    "memory_evidence_invalid",
+    "Memory evidence must reference a source and include an excerpt",
+  );
   invariant(input.confidence >= 0 && input.confidence <= 1, "invalid_confidence", "Confidence must be between 0 and 1");
   const timestamp = now.toISOString();
   const { id = randomUUID(), ...content } = structuredClone(input);
@@ -23,6 +29,10 @@ export function reviseMemory(current: MemoryRecord, assertion: string, sourceRef
     epistemicStatus: "fact",
     confidence: 1,
     sourceRefs: [...current.sourceRefs, sourceRef],
+    sourceEvidence: [
+      ...current.sourceEvidence,
+      { sourceId: sourceRef, excerpt: assertion, confidence: 1 },
+    ],
     createdAt: timestamp,
     updatedAt: timestamp,
     version: current.version + 1,

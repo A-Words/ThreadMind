@@ -15,7 +15,7 @@ import { DomainError } from "../domain/errors.ts";
 import type { ActionCard } from "../domain/model.ts";
 import { createMemory } from "../domain/memory.ts";
 import { prepareSubmission, sameSubmissionContent, SCREENSHOT_CONTENT_TYPES } from "../domain/submission.ts";
-import { cardEditInput, cardInput, cardVersionInput, executionInput, memoryInput, memoryRevisionInput, submissionFieldsInput } from "./schemas.ts";
+import { cardEditInput, cardInput, cardVersionInput, executionInput, memoryInput, memoryRevisionInput, memorySearchInput, submissionFieldsInput } from "./schemas.ts";
 
 export interface AppOptions {
   allowInsecureAccountHeader?: boolean;
@@ -160,10 +160,29 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     if (!result) return reply.code(404).send({ error: "not_found" });
     return reply.code(201).send(result.receipt);
   });
-  app.get("/v1/memories", async (request) => ({ items: await memories.listActive(request.accountId) }));
+  app.get("/v1/memories", async (request) => {
+    const query = memorySearchInput.parse(request.query);
+    return {
+      items: await memories.listActive(request.accountId, {
+        ...(query.q ? { search: query.q } : {}),
+        ...(query.subjectRef ? { subjectRef: query.subjectRef } : {}),
+        ...(query.type ? { type: query.type } : {}),
+        ...(query.from ? { createdFrom: query.from } : {}),
+        ...(query.to ? { createdTo: query.to } : {}),
+        limit: query.limit,
+      }),
+    };
+  });
   app.post("/v1/memories", async (request, reply) => {
     const input = memoryInput.parse(request.body);
-    const memory = createMemory({ accountId: request.accountId, ...input });
+    const memory = createMemory({
+      accountId: request.accountId,
+      ...input,
+      sourceEvidence: input.sourceEvidence.map(({ messageId, ...evidence }) => ({
+        ...evidence,
+        ...(messageId ? { messageId } : {}),
+      })),
+    });
     return reply.code(201).send(await memories.create(memory));
   });
   app.patch<{ Params: { id: string } }>("/v1/memories/:id", async (request, reply) => {

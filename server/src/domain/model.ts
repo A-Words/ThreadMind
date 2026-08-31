@@ -136,6 +136,7 @@ export interface MemoryRecord {
   confidence: number;
   sensitivity: "normal" | "sensitive" | "highly_sensitive";
   sourceRefs: Id[];
+  sourceEvidence: EvidenceRef[];
   createdAt: string;
   updatedAt: string;
   version: number;

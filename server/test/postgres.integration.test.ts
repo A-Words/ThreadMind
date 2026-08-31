@@ -27,8 +27,12 @@ describe("PostgreSQL Memory Repository", { skip: !enabled }, () => {
         confidence: 0.6,
         sensitivity: "normal",
         sourceRefs: [sourceRef],
+        sourceEvidence: [{ sourceId: sourceRef, excerpt: "Integration evidence A", confidence: 0.8 }],
       }));
       assert.equal((await repository.listActive(accountId!)).some((item) => item.id === created.id), true);
+      assert.equal((await repository.listActive(accountId!, { search: "evidence a" })).some((item) => item.id === created.id), true);
+      assert.equal((await repository.listActive(accountId!, { subjectRef: "contact:test", type: "profile" })).some((item) => item.id === created.id), true);
+      assert.equal((await repository.listActive(accountId!, { createdFrom: "2999-01-01T00:00:00.000Z" })).some((item) => item.id === created.id), false);
       assert.equal((await repository.listActive(randomUUID())).some((item) => item.id === created.id), false);
 
       const revised = await repository.revise(accountId!, created.id, "Integration memory B", `${sourceRef}:correction`);

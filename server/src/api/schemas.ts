@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+const evidenceInput = z.object({
+  sourceId: z.string().min(1),
+  messageId: z.string().min(1).optional(),
+  excerpt: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+});
+
 export const submissionFieldsInput = z.object({
   submissionId: z.uuid(),
   source: z.enum(["in_app", "android_share"]),
@@ -13,12 +20,7 @@ export const cardInput = z.object({
   fields: z.record(z.string(), z.unknown()),
   fieldConfidence: z.record(z.string(), z.number().min(0).max(1)).default({}),
   validationIssues: z.array(z.string().min(1)).default([]),
-  evidence: z.array(z.object({
-    sourceId: z.string().min(1),
-    messageId: z.string().min(1).optional(),
-    excerpt: z.string().min(1),
-    confidence: z.number().min(0).max(1),
-  })),
+  evidence: z.array(evidenceInput),
   targetAccountId: z.string().min(1).optional(),
 });
 
@@ -46,6 +48,18 @@ export const memoryInput = z.object({
   confidence: z.number().min(0).max(1),
   sensitivity: z.enum(["normal", "sensitive", "highly_sensitive"]),
   sourceRefs: z.array(z.string().min(1)).min(1),
+  sourceEvidence: z.array(evidenceInput).min(1),
+});
+
+export const memorySearchInput = z.object({
+  q: z.string().trim().min(1).max(200).optional(),
+  subjectRef: z.string().trim().min(1).max(200).optional(),
+  type: memoryInput.shape.type.optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(100),
+}).refine((value) => !value.from || !value.to || value.from <= value.to, {
+  message: "from must not be after to",
 });
 
 export const memoryRevisionInput = z.object({
