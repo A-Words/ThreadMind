@@ -32,4 +32,11 @@ class ActionCardPolicyTest {
         assertEquals(2, edited.version)
         assertNull(edited.confirmedSnapshot)
     }
+
+    @Test fun `visible target account is enough without a duplicate field`() {
+        val evaluated = ActionCardPolicy.evaluate(
+            readyCard().copy(fields = mapOf("displayName" to "Chen", "contactMethod" to "chen@example.com")),
+        )
+        assertEquals(ActionStatus.READY, evaluated.status)
+    }
 }

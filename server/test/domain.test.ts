@@ -21,6 +21,17 @@ describe("Action Card invariants", () => {
     assert.throws(() => confirmCard(card), { code: "card_not_ready" });
   });
 
+  it("uses the visible target account as the single contact-account requirement", () => {
+    const card = evaluateCard({
+      ...readyCard(),
+      type: "create_contact",
+      fields: { displayName: "Chen", contactMethod: "chen@example.com" },
+      targetAccountId: "local",
+    });
+    assert.equal(card.status, "ready");
+    assert.equal(evaluateCard({ ...card, fields: { ...card.fields, displayName: "   " } }).status, "blocked");
+  });
+
   it("captures an immutable version and invalidates it after editing", () => {
     const confirmed = confirmCard(readyCard());
     assert.equal(confirmed.confirmedSnapshot?.version, 1);

@@ -16,6 +16,7 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -66,6 +67,7 @@ class AndroidProviderExecutor @Inject constructor(
         val start = OffsetDateTime.parse(card.fields.getValue("startsAt")).toInstant().toEpochMilli()
         val end = OffsetDateTime.parse(card.fields.getValue("endsAt")).toInstant().toEpochMilli()
         require(end > start) { "会议结束时间必须晚于开始时间" }
+        ZoneId.of(card.fields.getValue("timezone"))
         meetingAttendees(card.fields["attendees"])
         val calendarId = card.fields.getValue("targetCalendarId")
         require(calendarTargets().any {
@@ -106,6 +108,8 @@ class AndroidProviderExecutor @Inject constructor(
         }) { "目标联系人账户不可用，请重新选择" }
         val displayName = card.fields.getValue("displayName")
         val method = card.fields.getValue("contactMethod")
+        require(displayName.isNotBlank()) { "联系人姓名不能为空" }
+        requireRecognizableContactMethod(method)
         val matches = contactMatches(method, displayName)
             .mapNotNull { (contactId, matchedBy) -> loadCandidate(contactId, card.fields["accountName"] ?: card.targetAccountId, matchedBy, card.fields) }
         return if (matches.isEmpty()) ProviderPreflightResult.Clear(card.id, card.version)
@@ -130,6 +134,9 @@ class AndroidProviderExecutor @Inject constructor(
         val encoded = card.fields["changes"] ?: return ProviderPreflightResult.Blocked(card.id, card.version, "更新联系人必须包含字段差异")
         val changes = json.decodeFromString<List<ContactFieldChange>>(encoded)
         if (changes.isEmpty()) return ProviderPreflightResult.Blocked(card.id, card.version, "没有需要写入的联系人变化")
+        changes.forEach { change ->
+            if (change.field == "email" || change.field == "phone") requireRecognizableContactMethod(change.newValue, change.field)
+        }
         val current = loadFieldRows(candidate.rawContactId)
         for (change in changes) {
             require(change.rawContactId == candidate.rawContactId) { "联系人目标已变化，请重新选择" }
@@ -420,6 +427,19 @@ class AndroidProviderExecutor @Inject constructor(
         .filter(String::isNotEmpty)
         .onEach { require(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(it)) { "参与人必须是可识别的邮箱地址：$it" } }
 
+    private fun requireRecognizableContactMethod(value: String, expectedField: String? = null) {
+        val trimmed = value.trim()
+        val looksLikeEmail = EMAIL_PATTERN.matches(trimmed)
+        val normalizedPhone = PhoneNumberUtils.normalizeNumber(trimmed)
+        val looksLikePhone = normalizedPhone.count(Char::isDigit) >= 5
+        val valid = when (expectedField) {
+            "email" -> looksLikeEmail
+            "phone" -> looksLikePhone
+            else -> looksLikeEmail || looksLikePhone
+        }
+        require(valid) { "联系方式必须是可识别的电话号码或邮箱" }
+    }
+
     private fun calendarTargets(): List<ProviderTarget> {
         val targets = mutableListOf<ProviderTarget>()
         resolver.query(
@@ -484,6 +504,7 @@ class AndroidProviderExecutor @Inject constructor(
     }
 
     private companion object {
+        val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
         val json = Json { ignoreUnknownKeys = false; explicitNulls = false }
         val descriptors = listOf(
             FieldDescriptor("email", ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE, ContactsContract.CommonDataKinds.Email.ADDRESS),

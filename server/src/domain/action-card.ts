@@ -5,14 +5,14 @@ import type { ActionCard, ActionReceipt, ActionType, ConfirmedActionSnapshot, Ev
 
 const requiredFields = {
   create_meeting: ["title", "startsAt", "endsAt", "timezone", "targetCalendarId"],
-  create_contact: ["displayName", "contactMethod", "targetContactAccountId"],
+  create_contact: ["displayName", "contactMethod"],
   update_contact: ["targetContactId", "changes"],
 } as const;
 
 export function evaluateCard(card: ActionCard): ActionCard {
   const missing = requiredFields[card.type].filter((field) => {
     const value = card.fields[field];
-    return value === undefined || value === null || value === "";
+    return value === undefined || value === null || (typeof value === "string" && value.trim() === "");
   });
   const blockers = [
     ...card.validationIssues.map((issue) => `validation:${issue}`),

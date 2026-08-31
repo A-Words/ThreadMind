@@ -38,7 +38,7 @@ data class ConfirmedActionSnapshot(
 object ActionCardPolicy {
     private val required = mapOf(
         ActionType.CREATE_MEETING to setOf("title", "startsAt", "endsAt", "timezone", "targetCalendarId"),
-        ActionType.CREATE_CONTACT to setOf("displayName", "contactMethod", "targetContactAccountId"),
+        ActionType.CREATE_CONTACT to setOf("displayName", "contactMethod"),
         ActionType.UPDATE_CONTACT to setOf("targetContactId", "changes"),
     )
 
