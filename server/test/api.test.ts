@@ -96,7 +96,8 @@ describe("Action Card API", () => {
   });
 
   it("makes memory visible, correctable, deletable and account scoped", async () => {
-    const app = buildApp(undefined, { allowInsecureAccountHeader: true });
+    const store = new InMemoryStore();
+    const app = buildApp(store, { allowInsecureAccountHeader: true });
     const created = await app.inject({ method: "POST", url: "/v1/memories", headers: { "x-account-id": "a1" }, payload: {
       subjectRefs: ["contact-1"], type: "profile", assertion: "Works at A", epistemicStatus: "inference",
       confidence: 0.6, sensitivity: "normal", sourceRefs: ["message-1"],
@@ -126,6 +127,13 @@ describe("Action Card API", () => {
     assert.equal(removed.statusCode, 204);
     const listed = await app.inject({ method: "GET", url: "/v1/memories", headers: { "x-account-id": "a1" } });
     assert.deepEqual(listed.json().items.map((item: { id: string }) => item.id), [second.json().id]);
+    const revisedLineage = [...store.memories.values()].filter((item) => item.id === memory.id || item.id === revised.json().id);
+    assert.equal(revisedLineage.every((item) => item.status === "deleted" && item.assertion === "[deleted]"), true);
+    const cleared = await app.inject({ method: "DELETE", url: "/v1/memories", headers: { "x-account-id": "a1" } });
+    assert.equal(cleared.json().cleared, 1);
+    const afterClear = await app.inject({ method: "GET", url: "/v1/memories", headers: { "x-account-id": "a1" } });
+    assert.deepEqual(afterClear.json().items, []);
+    assert.equal([...store.memories.values()].every((item) => item.status === "deleted" && item.assertion === "[deleted]"), true);
     await app.close();
   });
 });

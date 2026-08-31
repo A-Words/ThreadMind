@@ -43,7 +43,19 @@ export function reviseMemory(current: MemoryRecord, assertion: string, sourceRef
 }
 
 export function deleteMemory(current: MemoryRecord, now = new Date()): MemoryRecord {
-  return { ...current, status: "deleted", updatedAt: now.toISOString() };
+  const sourceId = `deleted:${current.id}`;
+  return {
+    ...current,
+    subjectRefs: [],
+    assertion: "[deleted]",
+    epistemicStatus: "inference",
+    confidence: 0,
+    sensitivity: "normal",
+    sourceRefs: [sourceId],
+    sourceEvidence: [{ sourceId, excerpt: "用户已删除此记忆", confidence: 1 }],
+    status: "deleted",
+    updatedAt: now.toISOString(),
+  };
 }
 
 export function recallable(records: MemoryRecord[], accountId: string): MemoryRecord[] {

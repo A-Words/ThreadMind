@@ -204,6 +204,7 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     if (!revised) return reply.code(404).send({ error: "not_found" });
     return reply.send(revised);
   });
+  app.delete("/v1/memories", async (request) => ({ cleared: await memories.clear(request.accountId) }));
   app.delete<{ Params: { id: string } }>("/v1/memories/:id", async (request, reply) => {
     if (!await memories.remove(request.accountId, request.params.id)) return reply.code(404).send({ error: "not_found" });
     return reply.code(204).send();

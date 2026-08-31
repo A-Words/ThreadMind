@@ -18,6 +18,13 @@ export class InMemoryMemoryRepository implements MemoryRepository {
       .slice(0, query.limit ?? 100);
   }
 
+  async listAll(accountId: string): Promise<MemoryRecord[]> {
+    return [...this.store.memories.values()]
+      .filter((memory) => memory.accountId === accountId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id))
+      .map((memory) => structuredClone(memory));
+  }
+
   async create(memory: MemoryRecord): Promise<MemoryRecord> {
     this.store.memories.set(memory.id, structuredClone(memory));
     return structuredClone(memory);
@@ -35,7 +42,61 @@ export class InMemoryMemoryRepository implements MemoryRepository {
   async remove(accountId: string, id: string): Promise<boolean> {
     const current = this.store.memories.get(id);
     if (!current || current.accountId !== accountId) return false;
-    this.store.memories.set(current.id, deleteMemory(current));
+    if (current.status === "deleted") return true;
+    for (const memory of lineage([...this.store.memories.values()].filter((item) => item.accountId === accountId), id)) {
+      this.store.memories.set(memory.id, deleteMemory(memory));
+    }
     return true;
   }
+
+  async clear(accountId: string): Promise<number> {
+    let cleared = 0;
+    for (const memory of this.store.memories.values()) {
+      if (memory.accountId !== accountId || memory.status === "deleted") continue;
+      this.store.memories.set(memory.id, deleteMemory(memory));
+      cleared += 1;
+    }
+    return cleared;
+  }
+
+  async removeSubmissionSource(accountId: string, submissionId: string): Promise<number> {
+    let changed = 0;
+    for (const memory of this.store.memories.values()) {
+      if (memory.accountId !== accountId || memory.status === "deleted") continue;
+      const sourceRefs = memory.sourceRefs.filter((source) => !belongsToSubmission(source, submissionId));
+      if (sourceRefs.length === memory.sourceRefs.length) continue;
+      const updated = sourceRefs.length === 0
+        ? deleteMemory(memory)
+        : {
+            ...memory,
+            sourceRefs,
+            sourceEvidence: memory.sourceEvidence.filter((evidence) => sourceRefs.includes(evidence.sourceId)),
+            updatedAt: new Date().toISOString(),
+          };
+      this.store.memories.set(memory.id, updated);
+      changed += 1;
+    }
+    return changed;
+  }
+}
+
+function lineage(records: MemoryRecord[], startId: string): MemoryRecord[] {
+  const ids = new Set([startId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const record of records) {
+      if (ids.has(record.id) || (record.supersedesId && ids.has(record.supersedesId))) {
+        if (!ids.has(record.id)) changed = true;
+        ids.add(record.id);
+        if (record.supersedesId && !ids.has(record.supersedesId)) changed = true;
+        if (record.supersedesId) ids.add(record.supersedesId);
+      }
+    }
+  }
+  return records.filter((record) => ids.has(record.id));
+}
+
+function belongsToSubmission(sourceRef: string, submissionId: string): boolean {
+  return sourceRef === submissionId || sourceRef.startsWith(`${submissionId}:`);
 }

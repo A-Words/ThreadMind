@@ -63,6 +63,8 @@ describe("Memory and insight invariants", () => {
     const [superseded, corrected] = reviseMemory(first, "Works at B", "user-correction-1");
     const deleted = deleteMemory(corrected);
     assert.deepEqual(recallable([superseded, deleted], "account-1"), []);
+    assert.equal(deleted.assertion, "[deleted]");
+    assert.deepEqual(deleted.subjectRefs, []);
     assert.equal(corrected.epistemicStatus, "fact");
     assert.equal(corrected.supersedesId, first.id);
     assert.equal(corrected.sourceEvidence.at(-1)?.excerpt, "Works at B");
