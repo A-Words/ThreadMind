@@ -4,7 +4,7 @@ import type { ThreadMindDatabase } from "./schema.ts";
 
 const { Pool } = pg;
 
-export function createDatabase(env: NodeJS.ProcessEnv): Kysely<ThreadMindDatabase> {
+export function createDatabase(env: NodeJS.ProcessEnv, applicationName = "threadmind-api"): Kysely<ThreadMindDatabase> {
   const connectionString = env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is required");
   const max = Number(env.DATABASE_POOL_MAX ?? 5);
@@ -18,7 +18,7 @@ export function createDatabase(env: NodeJS.ProcessEnv): Kysely<ThreadMindDatabas
         max,
         idleTimeoutMillis: 30_000,
         connectionTimeoutMillis: 10_000,
-        application_name: "threadmind-api",
+        application_name: applicationName,
       }),
     }),
   });

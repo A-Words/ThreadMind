@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "node --env-file-if-exists=../.env --watch --import=tsx src/api/main.ts",
+    "dev:worker": "node --env-file-if-exists=../.env --watch --import=tsx src/worker/main.ts",
     "start": "node --env-file-if-exists=../.env dist/src/api/main.js",
+    "start:worker": "node --env-file-if-exists=../.env dist/src/worker/main.js",
     "test": "npm run build --silent && node --test dist/test/*.test.js",
     "test:integration": "npm run build --silent && node --env-file-if-exists=../.env --test dist/test/postgres.integration.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
