@@ -10,6 +10,7 @@ import app.threadmind.provider.ProviderExecutor
 import app.threadmind.provider.ProviderResult
 import app.threadmind.provider.ContactCandidate
 import app.threadmind.provider.ProviderPreflightResult
+import app.threadmind.provider.ProviderTarget
 import app.threadmind.network.ThreadMindApi
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.MemoryRevisionRequest
@@ -47,6 +48,7 @@ data class MainUiState(
     val providerReviewedVersions: Set<String> = emptySet(),
     val pendingProviderReviewIds: Set<String> = emptySet(),
     val providerReview: ProviderPreflightResult? = null,
+    val providerTargetSelection: ProviderTargetSelection? = null,
     val message: String? = null,
     val backendStatus: BackendStatus = BackendStatus.IDLE,
     val backendMessage: String = "尚未连接服务端",
@@ -65,6 +67,12 @@ data class MainUiState(
     val dataMessage: String? = null,
     val pendingExport: AccountExportPayload? = null,
     val accountDeleted: Boolean = false,
+)
+
+data class ProviderTargetSelection(
+    val cardId: String,
+    val version: Int,
+    val targets: List<ProviderTarget>,
 )
 
 enum class BackendStatus { IDLE, CHECKING, CONNECTED, FAILED }
@@ -112,6 +120,7 @@ class MainViewModel @Inject constructor(
                 cards = emptyList(),
                 providerReviewedVersions = emptySet(),
                 providerReview = null,
+                providerTargetSelection = null,
             )
         }
     }
@@ -610,6 +619,60 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun loadProviderTargets(cardId: String) {
+        val card = state.value.cards.singleOrNull { it.id == cardId } ?: return
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    pendingProviderReviewIds = it.pendingProviderReviewIds + cardId,
+                    providerTargetSelection = null,
+                    message = "正在读取设备可写入账户…",
+                )
+            }
+            runCatching { providerExecutor.targets(card) }
+                .onSuccess { targets ->
+                    mutableState.update {
+                        it.copy(
+                            pendingProviderReviewIds = it.pendingProviderReviewIds - cardId,
+                            providerTargetSelection = if (targets.isEmpty()) null else ProviderTargetSelection(card.id, card.version, targets),
+                            message = if (targets.isEmpty()) "没有找到可写入的设备账户" else null,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            pendingProviderReviewIds = it.pendingProviderReviewIds - cardId,
+                            message = error.message ?: "无法读取设备账户",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun selectProviderTarget(target: ProviderTarget) {
+        val selection = state.value.providerTargetSelection ?: return
+        val card = state.value.cards.singleOrNull { it.id == selection.cardId && it.version == selection.version } ?: return
+        setCardPending(card.id, true)
+        viewModelScope.launch {
+            runCatching {
+                submissions.edit(
+                    cardId = card.id,
+                    expectedVersion = card.version,
+                    fields = card.fields + target.fieldUpdates,
+                    targetAccountId = target.targetAccountId,
+                    resolvedValidationIssues = card.validationIssues.filter(::isTargetSelectionIssue),
+                )
+            }.onSuccess { updated ->
+                invalidateProviderReview(card.id)
+                mutableState.update { it.copy(providerTargetSelection = null) }
+                replaceCard(updated, "已选择 ${target.label}；请重新检查设备数据")
+            }.onFailure { error -> finishCardRequest(card.id, error.message ?: "无法保存目标账户") }
+        }
+    }
+
+    fun dismissProviderTargets() = mutableState.update { it.copy(providerTargetSelection = null) }
+
     fun approveProviderReview() {
         val review = state.value.providerReview ?: return
         approveProviderReview(review.cardId, review.version, "已明确处理设备数据冲突")
@@ -655,7 +718,7 @@ class MainViewModel @Inject constructor(
                     cardId = card.id,
                     expectedVersion = card.version,
                     fields = providerExecutor.updateFields(candidate),
-                    targetAccountId = candidate.accountName ?: card.targetAccountId.orEmpty(),
+                    targetAccountId = candidate.accountName ?: "local",
                     resolvedValidationIssues = card.validationIssues,
                     type = ActionType.UPDATE_CONTACT,
                 )
@@ -675,6 +738,11 @@ class MainViewModel @Inject constructor(
 
     private fun invalidateProviderReview(cardId: String) = mutableState.update {
         it.copy(providerReviewedVersions = it.providerReviewedVersions.filterNot { key -> key.startsWith("$cardId:") }.toSet())
+    }
+
+    private fun isTargetSelectionIssue(issue: String): Boolean {
+        val normalized = issue.lowercase()
+        return normalized.contains("target") && (normalized.contains("account") || normalized.contains("calendar"))
     }
 
     private suspend fun recordOutcome(cardId: String, request: ActionReceiptRequest, status: ActionStatus, successMessage: String) {

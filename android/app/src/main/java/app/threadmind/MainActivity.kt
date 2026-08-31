@@ -62,6 +62,7 @@ import app.threadmind.domain.actionFieldSpecs
 import app.threadmind.network.MemoryRecordResponse
 import app.threadmind.network.InsightBundleResponse
 import app.threadmind.provider.ProviderPreflightResult
+import app.threadmind.provider.ProviderTarget
 import app.threadmind.ui.theme.ThreadMindTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -177,8 +178,9 @@ private fun ThreadMindScreen(
         if (pending != null) {
             if (grants.values.all { it }) {
                 if (pending.second == ProviderPermissionAction.PREFLIGHT) viewModel.preflightProvider(pending.first)
+                else if (pending.second == ProviderPermissionAction.TARGETS) viewModel.loadProviderTargets(pending.first)
                 else scope.launch { viewModel.execute(pending.first) }
-            } else if (pending.second == ProviderPermissionAction.PREFLIGHT) {
+            } else if (pending.second != ProviderPermissionAction.EXECUTE) {
                 viewModel.providerReadPermissionDenied()
             } else {
                 viewModel.permissionDenied(pending.first)
@@ -356,6 +358,13 @@ private fun ThreadMindScreen(
                             else arrayOf(Manifest.permission.READ_CONTACTS),
                         )
                     },
+                    onSelectTarget = {
+                        pendingProviderPermission = card.id to ProviderPermissionAction.TARGETS
+                        permissions.launch(
+                            if (card.type == ActionType.CREATE_MEETING) arrayOf(Manifest.permission.READ_CALENDAR)
+                            else arrayOf(Manifest.permission.READ_CONTACTS),
+                        )
+                    },
                     onExecute = {
                         pendingProviderPermission = card.id to ProviderPermissionAction.EXECUTE
                         permissions.launch(
@@ -452,6 +461,13 @@ private fun ThreadMindScreen(
             onDismiss = viewModel::dismissProviderReview,
         )
     }
+    state.providerTargetSelection?.let { selection ->
+        ProviderTargetDialog(
+            targets = selection.targets,
+            onSelect = viewModel::selectProviderTarget,
+            onDismiss = viewModel::dismissProviderTargets,
+        )
+    }
 }
 
 @Composable
@@ -465,6 +481,7 @@ private fun ActionCardReviewCard(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
     onPreflight: () -> Unit,
+    onSelectTarget: () -> Unit,
     onExecute: () -> Unit,
     onRetryReceipt: () -> Unit,
 ) {
@@ -515,6 +532,9 @@ private fun ActionCardReviewCard(
                 label = { Text("目标账户（必填且可修改）") },
                 modifier = Modifier.fillMaxWidth(),
             )
+            TextButton(onClick = onSelectTarget, enabled = editable && !isPending && !providerReviewPending) {
+                Text("从设备账户中选择")
+            }
             card.validationIssues.forEach { issue ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -619,7 +639,30 @@ private fun ProviderReviewDialog(
     )
 }
 
-private enum class ProviderPermissionAction { PREFLIGHT, EXECUTE }
+@Composable
+private fun ProviderTargetDialog(
+    targets: List<ProviderTarget>,
+    onSelect: (ProviderTarget) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择目标账户") },
+        text = {
+            LazyColumn {
+                items(targets) { target ->
+                    TextButton(onClick = { onSelect(target) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(target.label)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("返回") } },
+    )
+}
+
+private enum class ProviderPermissionAction { PREFLIGHT, TARGETS, EXECUTE }
 
 @Composable
 private fun MemoryCard(

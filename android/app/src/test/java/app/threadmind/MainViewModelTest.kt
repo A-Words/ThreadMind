@@ -31,6 +31,7 @@ import app.threadmind.provider.ContactCandidate
 import app.threadmind.provider.ContactFieldChange
 import app.threadmind.provider.MeetingConflict
 import app.threadmind.provider.ProviderPreflightResult
+import app.threadmind.provider.ProviderTarget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -251,6 +252,32 @@ class MainViewModelTest {
         assertEquals("contact-1", viewModel.state.value.cards.single().fields["targetContactId"])
         assertEquals(emptySet<String>(), viewModel.state.value.providerReviewedVersions)
     }
+
+    @Test fun `device target selection writes the actual account fields into a new card version`() = runTest(dispatcher) {
+        val target = ProviderTarget(
+            targetAccountId = "person@example.com",
+            label = "person@example.com · contacts",
+            fieldUpdates = mapOf("accountName" to "person@example.com", "accountType" to "contacts"),
+        )
+        val viewModel = MainViewModel(
+            FakeProviderExecutor(availableTargets = listOf(target)),
+            FakeThreadMindApi(),
+            FakeSubmissionWorkflowRepository(),
+        )
+        viewModel.showCards(listOf(actionCard()))
+
+        viewModel.loadProviderTargets("card-1")
+        runCurrent()
+        assertEquals(listOf(target), viewModel.state.value.providerTargetSelection?.targets)
+
+        viewModel.selectProviderTarget(target)
+        runCurrent()
+        val updated = viewModel.state.value.cards.single()
+        assertEquals(2, updated.version)
+        assertEquals("person@example.com", updated.targetAccountId)
+        assertEquals("contacts", updated.fields["accountType"])
+        assertEquals(null, viewModel.state.value.providerTargetSelection)
+    }
 }
 
 private class FakeSubmissionWorkflowRepository(
@@ -395,6 +422,7 @@ private fun insightBundle() = InsightBundleResponse(
 )
 
 private class FakeProviderExecutor(
+    private val availableTargets: List<ProviderTarget> = emptyList(),
     private val inspection: (ActionCard) -> ProviderPreflightResult = { ProviderPreflightResult.Clear(it.id, it.version) },
 ) : ProviderExecutor {
     var executionCount = 0
@@ -405,6 +433,8 @@ private class FakeProviderExecutor(
     }
 
     override suspend fun inspect(card: ActionCard) = inspection(card)
+
+    override suspend fun targets(card: ActionCard) = availableTargets
 
     override fun updateFields(candidate: ContactCandidate): Map<String, String> = mapOf(
         "targetContactId" to candidate.contactId,

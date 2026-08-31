@@ -48,9 +48,18 @@ class AndroidProviderExecutor @Inject constructor(
         }
     }
 
+    override suspend fun targets(card: ActionCard): List<ProviderTarget> = withContext(Dispatchers.IO) {
+        when (card.type) {
+            ActionType.CREATE_MEETING -> calendarTargets()
+            ActionType.CREATE_CONTACT, ActionType.UPDATE_CONTACT -> contactTargets()
+        }
+    }
+
     override fun updateFields(candidate: ContactCandidate): Map<String, String> = mapOf(
         "targetContactId" to candidate.contactId,
         "changes" to json.encodeToString(candidate.proposedChanges),
+        "accountName" to candidate.accountName.orEmpty(),
+        "accountType" to candidate.accountType.orEmpty(),
     )
 
     private fun inspectMeeting(card: ActionCard): ProviderPreflightResult {
@@ -59,6 +68,9 @@ class AndroidProviderExecutor @Inject constructor(
         require(end > start) { "会议结束时间必须晚于开始时间" }
         meetingAttendees(card.fields["attendees"])
         val calendarId = card.fields.getValue("targetCalendarId")
+        require(calendarTargets().any {
+            it.fieldUpdates["targetCalendarId"] == calendarId && it.targetAccountId == card.targetAccountId
+        }) { "目标日历不可用或已不可写，请重新选择" }
         val uriBuilder = CalendarContract.Instances.CONTENT_URI.buildUpon()
         ContentUris.appendId(uriBuilder, start)
         ContentUris.appendId(uriBuilder, end)
@@ -89,10 +101,13 @@ class AndroidProviderExecutor @Inject constructor(
     }
 
     private fun inspectCreateContact(card: ActionCard): ProviderPreflightResult {
+        require(contactTargets().any {
+            it.targetAccountId == card.targetAccountId && it.fieldUpdates["accountType"].orEmpty() == card.fields["accountType"].orEmpty()
+        }) { "目标联系人账户不可用，请重新选择" }
         val displayName = card.fields.getValue("displayName")
         val method = card.fields.getValue("contactMethod")
         val matches = contactMatches(method, displayName)
-            .mapNotNull { (contactId, matchedBy) -> loadCandidate(contactId, card.targetAccountId, matchedBy, card.fields) }
+            .mapNotNull { (contactId, matchedBy) -> loadCandidate(contactId, card.fields["accountName"] ?: card.targetAccountId, matchedBy, card.fields) }
         return if (matches.isEmpty()) ProviderPreflightResult.Clear(card.id, card.version)
         else ProviderPreflightResult.ContactCandidates(card.id, card.version, matches, createContact = true)
     }
@@ -100,12 +115,12 @@ class AndroidProviderExecutor @Inject constructor(
     private fun inspectUpdateContact(card: ActionCard): ProviderPreflightResult {
         val targetId = card.fields["targetContactId"]
         val matches = if (!targetId.isNullOrBlank()) {
-            listOfNotNull(loadCandidate(targetId, card.targetAccountId, "已选目标", emptyMap()))
+            listOfNotNull(loadCandidate(targetId, card.fields["accountName"] ?: card.targetAccountId, "已选目标", emptyMap()))
         } else {
             val query = card.fields["contactQuery"] ?: card.fields["displayName"] ?: card.fields["contactMethod"]
                 ?: return ProviderPreflightResult.Blocked(card.id, card.version, "更新联系人前必须提供联系人查询条件")
             contactMatches(card.fields["contactMethod"], query)
-                .mapNotNull { (contactId, matchedBy) -> loadCandidate(contactId, card.targetAccountId, matchedBy, card.fields) }
+                .mapNotNull { (contactId, matchedBy) -> loadCandidate(contactId, card.fields["accountName"] ?: card.targetAccountId, matchedBy, card.fields) }
         }
         if (matches.isEmpty()) return ProviderPreflightResult.Blocked(card.id, card.version, "没有找到可唯一更新的联系人")
         if (matches.size > 1 || targetId.isNullOrBlank()) {
@@ -173,10 +188,12 @@ class AndroidProviderExecutor @Inject constructor(
         val marker = "ThreadMind:${snapshot.idempotencyKey}"
         existingContactId(marker)?.let { return ProviderResult.Succeeded(it) }
         val method = snapshot.fields.getValue("contactMethod")
+        val accountName = snapshot.fields["accountName"]?.trim()?.takeIf(String::isNotEmpty)
+        val accountType = snapshot.fields["accountType"]?.trim()?.takeIf(String::isNotEmpty)
         val operations = arrayListOf(
             ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
-                .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, snapshot.fields["accountType"])
-                .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, snapshot.targetAccountId)
+                .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, accountType)
+                .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, accountName)
                 .build(),
             ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                 .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
@@ -402,6 +419,69 @@ class AndroidProviderExecutor @Inject constructor(
         .map(String::trim)
         .filter(String::isNotEmpty)
         .onEach { require(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(it)) { "参与人必须是可识别的邮箱地址：$it" } }
+
+    private fun calendarTargets(): List<ProviderTarget> {
+        val targets = mutableListOf<ProviderTarget>()
+        resolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            arrayOf(
+                CalendarContract.Calendars._ID,
+                CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                CalendarContract.Calendars.ACCOUNT_NAME,
+                CalendarContract.Calendars.ACCOUNT_TYPE,
+            ),
+            "${CalendarContract.Calendars.VISIBLE} = 1 AND ${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL} >= ?",
+            arrayOf(CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR.toString()),
+            "${CalendarContract.Calendars.CALENDAR_DISPLAY_NAME} COLLATE NOCASE",
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(0).toString()
+                val displayName = cursor.getString(1).orEmpty().ifBlank { "未命名日历" }
+                val accountName = cursor.getString(2)
+                val accountType = cursor.getString(3)
+                targets += ProviderTarget(
+                    targetAccountId = accountName ?: "local",
+                    label = "$displayName · ${accountName ?: "设备本地"}",
+                    fieldUpdates = mapOf(
+                        "targetCalendarId" to id,
+                        "targetCalendarName" to displayName,
+                        "accountType" to accountType.orEmpty(),
+                    ),
+                )
+            }
+        }
+        return targets
+    }
+
+    private fun contactTargets(): List<ProviderTarget> {
+        val accounts = linkedMapOf<Pair<String?, String?>, Unit>()
+        accounts[null to null] = Unit
+        resolver.query(
+            ContactsContract.Settings.CONTENT_URI,
+            arrayOf(ContactsContract.Settings.ACCOUNT_NAME, ContactsContract.Settings.ACCOUNT_TYPE),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) accounts[cursor.getString(0) to cursor.getString(1)] = Unit
+        }
+        resolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts.ACCOUNT_NAME, ContactsContract.RawContacts.ACCOUNT_TYPE),
+            "${ContactsContract.RawContacts.DELETED} = 0",
+            null,
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) accounts[cursor.getString(0) to cursor.getString(1)] = Unit
+        }
+        return accounts.keys.map { (accountName, accountType) ->
+            ProviderTarget(
+                targetAccountId = accountName ?: "local",
+                label = if (accountName == null) "设备本地联系人" else "$accountName · ${accountType ?: "未知类型"}",
+                fieldUpdates = mapOf("accountName" to accountName.orEmpty(), "accountType" to accountType.orEmpty()),
+            )
+        }.sortedBy(ProviderTarget::label)
+    }
 
     private companion object {
         val json = Json { ignoreUnknownKeys = false; explicitNulls = false }

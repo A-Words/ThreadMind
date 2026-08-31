@@ -35,6 +35,12 @@ data class ContactFieldSnapshot(
     val value: String,
 )
 
+data class ProviderTarget(
+    val targetAccountId: String,
+    val label: String,
+    val fieldUpdates: Map<String, String>,
+)
+
 fun buildProposedContactChanges(
     rawContactId: String,
     current: List<ContactFieldSnapshot>,
@@ -96,5 +102,6 @@ sealed interface ProviderPreflightResult {
 
 interface ProviderInspector {
     suspend fun inspect(card: ActionCard): ProviderPreflightResult
+    suspend fun targets(card: ActionCard): List<ProviderTarget> = emptyList()
     fun updateFields(candidate: ContactCandidate): Map<String, String>
 }

@@ -17,6 +17,8 @@ fun actionFieldSpecs(type: ActionType): List<ActionFieldSpec> = when (type) {
         ActionFieldSpec("attendees", "参与人邮箱（逗号分隔）"),
         ActionFieldSpec("notes", "备注"),
         ActionFieldSpec("targetCalendarId", "目标日历 ID", required = true),
+        ActionFieldSpec("targetCalendarName", "目标日历", providerManaged = true),
+        ActionFieldSpec("accountType", "日历账户类型", providerManaged = true),
     )
     ActionType.CREATE_CONTACT -> listOf(
         ActionFieldSpec("displayName", "姓名", required = true),
@@ -27,11 +29,14 @@ fun actionFieldSpecs(type: ActionType): List<ActionFieldSpec> = when (type) {
         ActionFieldSpec("jobTitle", "职位"),
         ActionFieldSpec("address", "地址"),
         ActionFieldSpec("notes", "备注"),
+        ActionFieldSpec("accountName", "联系人账户", providerManaged = true),
         ActionFieldSpec("accountType", "联系人账户类型", providerManaged = true),
     )
     ActionType.UPDATE_CONTACT -> listOf(
         ActionFieldSpec("contactQuery", "联系人查询条件"),
         ActionFieldSpec("targetContactId", "目标联系人 ID", required = true, providerManaged = true),
         ActionFieldSpec("changes", "已审核字段差异", required = true, providerManaged = true),
+        ActionFieldSpec("accountName", "联系人账户", providerManaged = true),
+        ActionFieldSpec("accountType", "联系人账户类型", providerManaged = true),
     )
 }
