@@ -5,6 +5,7 @@ COPY server/package.json server/package.json
 RUN npm ci
 COPY server server
 RUN npm run build -w @threadmind/server
+RUN npm prune --omit=dev
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
