@@ -1,4 +1,5 @@
 import type { Insertable, Kysely, Selectable } from "kysely";
+import { sql } from "kysely";
 import { DomainError } from "../domain/errors.ts";
 import type { BackgroundJob, ScreenshotSubmission } from "../domain/model.ts";
 import { sameSubmissionContent } from "../domain/submission.ts";
@@ -15,6 +16,8 @@ export class KyselySubmissionRepository implements SubmissionRepository {
     return retryTransient(() => withAccount(this.database, accountId, async (tx) => {
       let selection = tx.selectFrom("threadmind.screenshot_submissions as s")
         .select(["s.id", "s.status", "s.submission_source", "s.created_at", "s.updated_at"])
+        // Preserve PostgreSQL microseconds in the keyset cursor, not JS Date's milliseconds.
+        .select(sql<string>`to_char(s.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as("cursor_created_at"))
         .where("s.account_id", "=", accountId).where("s.status", "!=", "deleted");
       if (query.view === "attention") selection = selection.where((eb) => eb.or([
         eb("s.status", "in", ["uploaded", "processing", "failed"]),
@@ -25,8 +28,8 @@ export class KyselySubmissionRepository implements SubmissionRepository {
       if (query.cursor) {
         const cursor = query.cursor;
         selection = selection.where((eb) => eb.or([
-          eb("s.created_at", "<", new Date(cursor.createdAt)),
-          eb.and([eb("s.created_at", "=", new Date(cursor.createdAt)), eb("s.id", "<", cursor.id)]),
+          eb("s.created_at", "<", sql<Date>`${cursor.createdAt}::timestamptz`),
+          eb.and([eb("s.created_at", "=", sql<Date>`${cursor.createdAt}::timestamptz`), eb("s.id", "<", cursor.id)]),
         ]));
       }
       const rows = await selection.orderBy("s.created_at", "desc").orderBy("s.id", "desc").limit(query.limit + 1).execute();
@@ -36,7 +39,7 @@ export class KyselySubmissionRepository implements SubmissionRepository {
         .groupBy(["submission_id", "status"]).execute() : [];
       return historyPage(rows.map((row) => ({
         id: row.id, status: row.status, source: row.submission_source,
-        createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+        createdAt: row.cursor_created_at, updatedAt: new Date(row.updated_at).toISOString(),
         actionCounts: { ...emptyActionCounts(), ...Object.fromEntries(counts.filter((c) => c.submission_id === row.id).map((c) => [c.status, Number(c.count)])) },
       })), query.limit);
     }));
