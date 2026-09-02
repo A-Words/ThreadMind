@@ -18,7 +18,7 @@ import androidx.room.Transaction
 data class PendingSubmissionEntity(
     val accountId: String,
     val id: String,
-    val localImagePath: String,
+    val localImagePath: String?,
     val imageContentType: String,
     val source: String,
     val supplementalText: String,
@@ -66,6 +66,9 @@ data class LocalSubmissionDeletion(
 
 @Dao
 interface WorkflowDao {
+    @Query("select * from pending_submissions where accountId = :accountId and status != 'deleted' order by createdAtEpochMillis desc, id desc")
+    suspend fun history(accountId: String): List<PendingSubmissionEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSubmission(entity: PendingSubmissionEntity)
 
@@ -90,7 +93,7 @@ interface WorkflowDao {
     @Query("select localImagePath from pending_submissions where accountId = :accountId and id = :submissionId")
     suspend fun submissionImagePath(accountId: String, submissionId: String): String?
 
-    @Query("select localImagePath from pending_submissions where accountId = :accountId")
+    @Query("select localImagePath from pending_submissions where accountId = :accountId and localImagePath is not null")
     suspend fun accountImagePaths(accountId: String): List<String>
 
     @Query("select receiptId from pending_receipts where accountId = :accountId and actionCardId in (select id from action_card_cache where accountId = :accountId and submissionId = :submissionId)")
@@ -170,7 +173,7 @@ interface WorkflowDao {
 
 @Database(
     entities = [PendingSubmissionEntity::class, ActionCardCacheEntity::class, PendingReceiptEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class ThreadMindDatabase : RoomDatabase() {

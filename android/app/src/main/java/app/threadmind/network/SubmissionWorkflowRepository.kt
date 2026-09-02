@@ -26,6 +26,7 @@ data class SubmissionProgress(
     val pendingReceipts: Map<String, ActionReceiptRequest> = emptyMap(),
     val providerReviewedVersions: Set<String> = emptySet(),
     val analysis: ExtractionResponse? = null,
+    val remoteOnly: Boolean = false,
 )
 
 data class AccountExportPayload(
@@ -35,6 +36,8 @@ data class AccountExportPayload(
 )
 
 interface SubmissionWorkflowRepository {
+    suspend fun open(submissionId: String): SubmissionProgress = refresh(submissionId)
+    suspend fun localHistory(): List<SubmissionSummaryResponse> = emptyList()
     suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String): SubmissionProgress
     suspend fun refresh(submissionId: String): SubmissionProgress
     suspend fun restoreLatest(): SubmissionProgress?
@@ -65,6 +68,31 @@ class AndroidSubmissionWorkflowRepository(
     private val scheduler: WorkflowWorkScheduler,
     private val syncEngine: WorkflowSyncEngine,
 ) : SubmissionWorkflowRepository {
+    override suspend fun localHistory(): List<SubmissionSummaryResponse> {
+        val accountId = auth.currentUserId() ?: return emptyList()
+        return dao.history(accountId).map { row ->
+            val cards = dao.cards(accountId, row.id)
+            val receipts = dao.pendingReceipts(accountId).mapTo(mutableSetOf()) { it.actionCardId }
+            val counts = cards.groupingBy { if (it.id in receipts) "executing" else it.status }.eachCount()
+            SubmissionSummaryResponse(row.id, java.time.Instant.ofEpochMilli(row.createdAtEpochMillis).toString(),
+                java.time.Instant.ofEpochMilli(row.updatedAtEpochMillis).toString(), row.source, row.status, counts)
+        }
+    }
+
+    override suspend fun open(submissionId: String): SubmissionProgress {
+        val accountId = requireNotNull(auth.currentUserId())
+        if (dao.submission(accountId, submissionId) == null) {
+            val remote = api.getSubmission(submissionId)
+            check(auth.currentUserId() == accountId) { "登录账户已变化" }
+            dao.upsertSubmission(PendingSubmissionEntity(
+                accountId, remote.id, null, remote.imageContentType, remote.source,
+                remote.supplementalText.orEmpty(), remote.status, remote.failureCode,
+                createdAtEpochMillis = java.time.Instant.parse(remote.createdAt).toEpochMilli(),
+                updatedAtEpochMillis = java.time.Instant.parse(remote.updatedAt).toEpochMilli(),
+            ))
+        }
+        return refresh(submissionId)
+    }
     override suspend fun submit(
         uri: Uri,
         submissionId: String,
@@ -249,7 +277,8 @@ class AndroidSubmissionWorkflowRepository(
             .filter { it.providerReviewedVersion == it.version }
             .mapTo(mutableSetOf()) { "${it.id}:${it.version}" }
         val analysis = submission.extractionJson?.let { WorkflowSyncEngine.json.decodeFromString<ExtractionResponse>(it) }
-        return SubmissionProgress(submissionId, submission.status, cards, submission.failureCode, receipts, reviewed, analysis)
+        val mergedCards = cards.map { card -> receipts[card.id]?.let { card.copy(status = app.threadmind.domain.ActionStatus.valueOf(recoverableCardStatus(it.status).uppercase())) } ?: card }
+        return SubmissionProgress(submissionId, submission.status, mergedCards, submission.failureCode, receipts, reviewed, analysis, submission.localImagePath == null)
     }
 
     private fun persistUpload(submissionId: String, upload: ImageUpload): File {

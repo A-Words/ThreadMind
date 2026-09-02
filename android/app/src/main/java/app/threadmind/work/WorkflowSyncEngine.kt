@@ -29,8 +29,8 @@ class WorkflowSyncEngine @Inject constructor(
         return try {
             val uploadedFromDevice = local.status == "pending_upload"
             val remote = if (local.status == "pending_upload") {
-                val image = File(local.localImagePath)
-                if (!image.isFile) {
+                val image = local.localImagePath?.let(::File)
+                if (image == null || !image.isFile) {
                     dao.updateSubmissionStatus(
                         accountId,
                         submissionId,
@@ -54,7 +54,7 @@ class WorkflowSyncEngine @Inject constructor(
                 api.getSubmission(submissionId)
             }
             dao.updateSubmissionStatus(accountId, submissionId, remote.status, remote.failureCode, System.currentTimeMillis())
-            if (uploadedFromDevice) File(local.localImagePath).delete()
+            if (uploadedFromDevice) local.localImagePath?.let(::File)?.delete()
             when (remote.status) {
                 "ready" -> {
                     val extraction = api.getExtraction(submissionId)
@@ -68,7 +68,7 @@ class WorkflowSyncEngine @Inject constructor(
                     WorkflowSyncResult.SUCCESS
                 }
                 "failed", "deleted" -> {
-                    File(local.localImagePath).delete()
+                    local.localImagePath?.let(::File)?.delete()
                     WorkflowSyncResult.SUCCESS
                 }
                 else -> WorkflowSyncResult.RETRY
@@ -78,7 +78,7 @@ class WorkflowSyncEngine @Inject constructor(
                 WorkflowSyncResult.RETRY
             } else {
                 dao.updateSubmissionStatus(accountId, submissionId, "failed", "client_sync_rejected", System.currentTimeMillis())
-                File(local.localImagePath).delete()
+                local.localImagePath?.let(::File)?.delete()
                 WorkflowSyncResult.FAILURE
             }
         }

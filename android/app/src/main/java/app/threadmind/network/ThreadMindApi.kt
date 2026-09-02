@@ -37,6 +37,22 @@ import okhttp3.MediaType.Companion.toMediaType
 data class MemoryListResponse(val items: List<MemoryRecordResponse>)
 
 @Serializable
+data class SubmissionSummaryResponse(
+    val id: String,
+    val createdAt: String,
+    val updatedAt: String,
+    val source: String,
+    val status: String,
+    val actionCounts: Map<String, Int> = emptyMap(),
+) {
+    val needsAttention: Boolean get() = status in setOf("pending_upload", "uploaded", "processing", "failed") ||
+        actionCounts.any { (status, count) -> status in setOf("draft", "blocked", "ready", "confirmed", "executing") && count > 0 }
+}
+
+@Serializable
+data class SubmissionHistoryResponse(val items: List<SubmissionSummaryResponse>, val nextCursor: String? = null)
+
+@Serializable
 data class ClearMemoriesResponse(val cleared: Int)
 
 @Serializable
@@ -205,6 +221,12 @@ private fun ConfirmedActionSnapshotResponse.toDomain() = ConfirmedActionSnapshot
 private fun JsonElement.asFieldString(): String = (this as? JsonPrimitive)?.contentOrNull ?: toString()
 
 interface ThreadMindApi {
+    @GET("v1/submissions")
+    suspend fun listSubmissions(
+        @Query("view") view: String = "all",
+        @Query("limit") limit: Int = 20,
+        @Query("cursor") cursor: String? = null,
+    ): SubmissionHistoryResponse
     @Multipart
     @POST("v1/submissions")
     suspend fun createSubmission(
@@ -273,6 +295,7 @@ interface ThreadMindApi {
 class UnavailableThreadMindApi(
     private val reason: String,
 ) : ThreadMindApi {
+    override suspend fun listSubmissions(view: String, limit: Int, cursor: String?): Nothing = error(reason)
     override suspend fun createSubmission(image: MultipartBody.Part, submissionId: RequestBody, source: RequestBody, supplementalText: RequestBody?): Nothing = error(reason)
     override suspend fun getSubmission(id: String): Nothing = error(reason)
     override suspend fun getExtraction(id: String): Nothing = error(reason)

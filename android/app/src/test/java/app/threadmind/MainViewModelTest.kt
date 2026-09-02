@@ -65,7 +65,7 @@ class MainViewModelTest {
         runCurrent()
 
         assertEquals(BackendStatus.CONNECTED, viewModel.state.value.backendStatus)
-        assertEquals("服务端已连接（1 条记忆）", viewModel.state.value.backendMessage)
+        assertEquals("服务端已连接", viewModel.state.value.backendMessage)
         assertEquals("memory-1", viewModel.state.value.memories.single().id)
     }
 
@@ -180,10 +180,10 @@ class MainViewModelTest {
         assertEquals("执行回执尚未同步，请勿再次写入系统", viewModel.state.value.message)
     }
 
-    @Test fun `backend check clears a previous account review when none is stored`() = runTest(dispatcher) {
+    @Test fun `account switch clears a previous account review when none is stored`() = runTest(dispatcher) {
         val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), FakeSubmissionWorkflowRepository())
         viewModel.showCards(listOf(actionCard()))
-
+        viewModel.switchAccount("different-account")
         viewModel.checkBackend()
         runCurrent()
 
@@ -319,7 +319,7 @@ private class FakeSubmissionWorkflowRepository(
     val reviewedVersions = mutableSetOf<String>()
 
     override suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String) = error("unused")
-    override suspend fun refresh(submissionId: String): SubmissionProgress = error("unused")
+    override suspend fun refresh(submissionId: String): SubmissionProgress = restored ?: error("unused")
     override suspend fun restoreLatest(): SubmissionProgress? = restored
     override suspend fun edit(
         cardId: String,
@@ -359,6 +359,7 @@ private fun actionCard() = ActionCard(
 )
 
 private class FakeThreadMindApi : ThreadMindApi {
+    override suspend fun listSubmissions(view: String, limit: Int, cursor: String?) = app.threadmind.network.SubmissionHistoryResponse(emptyList())
     private var memory: MemoryRecordResponse? = memoryRecord()
     var lastMemorySearch: String? = null
     var lastMemorySubjectRef: String? = null

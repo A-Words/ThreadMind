@@ -2,6 +2,7 @@ package app.threadmind
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.threadmind.domain.ActionCard
 import app.threadmind.domain.ActionStatus
@@ -26,6 +27,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CancellationException
+import app.threadmind.network.SubmissionSummaryResponse
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -36,6 +42,14 @@ import java.time.temporal.ChronoUnit
 enum class MemoryTimeFilter { ALL, LAST_30_DAYS, LAST_YEAR }
 
 data class MainUiState(
+    val accountId: String? = null,
+    val history: List<SubmissionSummaryResponse> = emptyList(),
+    val attention: List<SubmissionSummaryResponse> = emptyList(),
+    val historyView: String = "attention",
+    val historyCursor: String? = null,
+    val isHistoryLoading: Boolean = false,
+    val historyError: String? = null,
+    val readOnlyCardIds: Set<String> = emptySet(),
     val selectedImage: Uri? = null,
     val selectedImageSource: String = "in_app",
     val supplementalText: String = "",
@@ -81,10 +95,10 @@ enum class BackendStatus { IDLE, CHECKING, CONNECTED, FAILED }
 
 private fun progressMessage(progress: SubmissionProgress) = when (progress.status) {
     "pending_upload" -> "截图已保存在设备上，等待网络上传"
-    "uploaded" -> "截图已上传，等待安全分析"
+    "uploaded" -> "截图已上传，正在排队分析"
     "processing" -> "正在识别对话和行动依据…"
     "ready" -> "分析完成：${progress.cards.size} 张待审核卡片，云端原图已删除"
-    "failed" -> "分析失败（${progress.failureCode ?: "analysis_failed"}），云端原图已进入清理流程"
+    "failed" -> "这次分析未能完成，请重新选择截图；云端原图将被清理"
     else -> "正在处理提交"
 }
 
@@ -93,21 +107,90 @@ class MainViewModel @Inject constructor(
     private val providerExecutor: ProviderExecutor,
     private val api: ThreadMindApi,
     private val submissions: SubmissionWorkflowRepository,
+    private val savedState: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(MainUiState())
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
 
     private var submissionJob: Job? = null
+    private var accountScope = CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
+    private var historyJob: Job? = null
+
+    fun switchAccount(accountId: String?) {
+        if (state.value.accountId == accountId) return
+        accountScope.cancel()
+        accountScope = CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
+        val shared = state.value.selectedImage.takeIf { state.value.accountId == null }
+        val restore = savedState.get<String>("account") == accountId
+        mutableState.value = MainUiState(accountId = accountId, selectedImage = shared,
+            selectedImageSource = if (shared != null) "android_share" else "in_app",
+            memorySearch = if (restore) savedState["memorySearch"] ?: "" else "",
+            memorySubjectRef = if (restore) savedState["memorySubject"] ?: "" else "",
+            memoryType = if (restore) savedState["memoryType"] else null,
+            memoryTimeFilter = if (restore) MemoryTimeFilter.valueOf(savedState["memoryTime"] ?: "ALL") else MemoryTimeFilter.ALL,
+        )
+        if (!restore) savedState.keys().forEach { savedState.remove<Any>(it) }
+        savedState["account"] = accountId
+    }
+
+    fun setHistoryView(view: String) {
+        if (state.value.historyView == view) return
+        mutableState.update { it.copy(historyView = view, history = emptyList(), historyCursor = null) }
+        refreshHistory()
+    }
+
+    fun refreshHistory(loadMore: Boolean = false) {
+        if (loadMore && (state.value.isHistoryLoading || state.value.historyCursor == null)) return
+        historyJob?.cancel()
+        val view = state.value.historyView
+        val cursor = if (loadMore) state.value.historyCursor else null
+        mutableState.update { it.copy(isHistoryLoading = true, historyError = null) }
+        historyJob = accountScope.launch {
+            val local = accountRunCatching { submissions.localHistory() }.getOrDefault(emptyList())
+            accountRunCatching { api.listSubmissions(view, 20, cursor) }.onSuccess { page ->
+                val merged = mergeHistory(if (loadMore) state.value.history else emptyList(), page.items, local, view)
+                mutableState.update { it.copy(history = merged, historyCursor = page.nextCursor, isHistoryLoading = false,
+                    backendStatus = BackendStatus.CONNECTED, backendMessage = "服务端已连接",
+                    attention = if (view == "attention") merged.take(3) else it.attention) }
+                if (view != "attention") accountRunCatching { api.listSubmissions("attention", 3) }.onSuccess { pending ->
+                    mutableState.update { it.copy(attention = mergeHistory(emptyList(), pending.items, local, "attention").take(3)) }
+                }
+            }.onFailure {
+                mutableState.update { current -> current.copy(isHistoryLoading = false,
+                    history = mergeHistory(current.history, emptyList(), local, view),
+                    historyError = "暂时无法更新记录，已保留本机内容。请检查网络后重试。") }
+            }
+        }
+    }
+
+    fun openSubmission(id: String) {
+        submissionJob?.cancel()
+        savedState["submissionId"] = id
+        mutableState.update { it.copy(submissionId = id, submissionStatus = null, cards = emptyList(), analysis = null,
+            readOnlyCardIds = emptySet(), pendingReceipts = emptyMap(), providerReviewedVersions = emptySet(),
+            providerReview = null, providerTargetSelection = null, isSubmissionPending = true, submissionMessage = "正在读取分析记录…") }
+        submissionJob = accountScope.launch {
+            accountRunCatching { submissions.open(id) }.onSuccess { monitorSubmission(it) }
+                .onFailure { error -> finishSubmissionFailure(id, error) }
+        }
+    }
+
+    fun onForeground() {
+        refreshHistory()
+        if (state.value.submissionId != null && state.value.selectedImage == null) refreshSubmission()
+    }
+
+    fun clearMessage() = mutableState.update { it.copy(message = null) }
 
     fun importImage(uri: Uri?) = selectImage(uri, "in_app")
     fun importSharedImage(uri: Uri?) = selectImage(uri, "android_share")
     fun clearSelectedImage() = selectImage(null, "in_app")
     fun setSupplementalText(value: String) = mutableState.update { it.copy(supplementalText = value) }
     fun showCards(cards: List<ActionCard>) = mutableState.update { it.copy(cards = cards) }
-    fun setMemorySearch(value: String) = mutableState.update { it.copy(memorySearch = value) }
-    fun setMemorySubjectRef(value: String) = mutableState.update { it.copy(memorySubjectRef = value) }
-    fun setMemoryType(value: String?) = mutableState.update { it.copy(memoryType = value) }
-    fun setMemoryTimeFilter(value: MemoryTimeFilter) = mutableState.update { it.copy(memoryTimeFilter = value) }
+    fun setMemorySearch(value: String) { savedState["memorySearch"] = value; mutableState.update { it.copy(memorySearch = value) } }
+    fun setMemorySubjectRef(value: String) { savedState["memorySubject"] = value; mutableState.update { it.copy(memorySubjectRef = value) } }
+    fun setMemoryType(value: String?) { savedState["memoryType"] = value; mutableState.update { it.copy(memoryType = value) } }
+    fun setMemoryTimeFilter(value: MemoryTimeFilter) { savedState["memoryTime"] = value.name; mutableState.update { it.copy(memoryTimeFilter = value) } }
 
     private fun selectImage(uri: Uri?, source: String) {
         submissionJob?.cancel()
@@ -130,31 +213,37 @@ class MainViewModel @Inject constructor(
 
     fun submitForAnalysis() {
         val current = state.value
+        if (current.isSubmissionPending) return
         val image = current.selectedImage ?: run {
             mutableState.update { it.copy(submissionMessage = "请先选择一张聊天截图") }
             return
         }
         val submissionId = UUID.randomUUID().toString()
+        savedState["submissionId"] = submissionId
         submissionJob?.cancel()
         mutableState.update {
             it.copy(
                 submissionId = submissionId,
                 submissionStatus = "uploading",
                 isSubmissionPending = true,
-                submissionMessage = "正在加密上传截图…",
+                submissionMessage = "正在准备上传截图…",
                 cards = emptyList(),
                 analysis = null,
             )
         }
-        submissionJob = viewModelScope.launch {
-            runCatching {
+        submissionJob = accountScope.launch {
+            accountRunCatching {
                 submissions.submit(
                     uri = image,
                     submissionId = submissionId,
                     source = current.selectedImageSource,
                     supplementalText = current.supplementalText,
                 )
-            }.onSuccess { monitorSubmission(it) }
+            }.onSuccess {
+                mutableState.update { state -> state.copy(selectedImage = null, supplementalText = "") }
+                refreshHistory()
+                monitorSubmission(it)
+            }
                 .onFailure { error -> finishSubmissionFailure(submissionId, error) }
         }
     }
@@ -163,8 +252,8 @@ class MainViewModel @Inject constructor(
         val submissionId = state.value.submissionId ?: return
         submissionJob?.cancel()
         mutableState.update { it.copy(isSubmissionPending = true, submissionMessage = "正在刷新分析状态…") }
-        submissionJob = viewModelScope.launch {
-            runCatching { submissions.refresh(submissionId) }
+        submissionJob = accountScope.launch {
+            accountRunCatching { submissions.refresh(submissionId) }
                 .onSuccess { monitorSubmission(it) }
                 .onFailure { error -> finishSubmissionFailure(submissionId, error) }
         }
@@ -197,60 +286,37 @@ class MainViewModel @Inject constructor(
             analysis = if (progress.status == "ready") progress.analysis else current.analysis,
             pendingReceipts = progress.pendingReceipts,
             providerReviewedVersions = progress.providerReviewedVersions,
+            readOnlyCardIds = if (!progress.remoteOnly) emptySet() else progress.cards.filter {
+                it.status in setOf(ActionStatus.CONFIRMED, ActionStatus.EXECUTING) && it.reviewKey() !in progress.providerReviewedVersions
+            }.mapTo(mutableSetOf()) { it.id },
         )
     }
 
     private fun finishSubmissionFailure(submissionId: String, error: Throwable) = mutableState.update { current ->
         if (current.submissionId != submissionId) current else current.copy(
             isSubmissionPending = false,
-            submissionMessage = error.message?.takeIf(String::isNotBlank) ?: "提交处理失败",
+            submissionMessage = if (error is retrofit2.HttpException && error.code() == 404) "这条来源已删除或当前账号无法访问。" else "暂时无法同步分析状态，请检查网络后刷新；不会重复上传。",
         )
     }
 
     fun checkBackend() {
-        val filters = state.value
-        viewModelScope.launch {
-            mutableState.update {
-                it.copy(backendStatus = BackendStatus.CHECKING, backendMessage = "正在验证服务端身份…")
+        refreshMemories()
+        refreshInsights()
+        refreshHistory()
+        accountScope.launch {
+            accountRunCatching { submissions.restoreLatest() }.onSuccess { latest ->
+                val selected: String? = savedState["submissionId"]
+                if (state.value.selectedImage == null && state.value.submissionId == null) {
+                    (selected ?: latest?.submissionId)?.let(::openSubmission)
+                }
             }
-            runCatching {
-                Triple(listMemories(filters), submissions.restoreLatest(), api.listInsights())
-            }.onSuccess { (response, restored, insightResponse) ->
-                    mutableState.update {
-                        it.copy(
-                            backendStatus = BackendStatus.CONNECTED,
-                            backendMessage = "服务端已连接（${response.items.size} 条记忆）",
-                            memories = response.items,
-                            memoryMessage = null,
-                            submissionId = restored?.submissionId,
-                            submissionStatus = restored?.status,
-                            isSubmissionPending = restored != null && restored.status !in setOf("ready", "failed"),
-                            cards = restored?.cards.orEmpty(),
-                            analysis = restored?.analysis,
-                            pendingReceipts = restored?.pendingReceipts.orEmpty(),
-                            providerReviewedVersions = restored?.providerReviewedVersions.orEmpty(),
-                            providerReview = null,
-                            submissionMessage = restored?.let(::progressMessage),
-                            insights = insightResponse.items,
-                            insightMessage = null,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    mutableState.update {
-                        it.copy(
-                            backendStatus = BackendStatus.FAILED,
-                            backendMessage = error.message?.takeIf(String::isNotBlank) ?: "服务端连接失败",
-                        )
-                    }
-                }
         }
     }
 
     fun refreshInsights() {
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update { it.copy(isInsightLoading = true, insightMessage = null) }
-            runCatching { api.listInsights() }
+            accountRunCatching { api.listInsights() }
                 .onSuccess { response ->
                     mutableState.update {
                         it.copy(
@@ -273,9 +339,9 @@ class MainViewModel @Inject constructor(
 
     fun refreshMemories() {
         val filters = state.value
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update { it.copy(isMemoryLoading = true, memoryMessage = null) }
-            runCatching { listMemories(filters) }
+            accountRunCatching { listMemories(filters) }
                 .onSuccess { response ->
                     mutableState.update {
                         it.copy(
@@ -324,9 +390,9 @@ class MainViewModel @Inject constructor(
             mutableState.update { it.copy(memoryMessage = "记忆内容不能为空") }
             return
         }
-        viewModelScope.launch {
+        accountScope.launch {
             setMemoryPending(id, true)
-            runCatching {
+            accountRunCatching {
                 api.reviseMemory(
                     id,
                     MemoryRevisionRequest(assertion.trim(), "user-correction:${UUID.randomUUID()}"),
@@ -347,9 +413,9 @@ class MainViewModel @Inject constructor(
     }
 
     fun deleteMemory(id: String) {
-        viewModelScope.launch {
+        accountScope.launch {
             setMemoryPending(id, true)
-            runCatching {
+            accountRunCatching {
                 val response = api.deleteMemory(id)
                 check(response.isSuccessful) { "删除失败（HTTP ${response.code()}）" }
             }.onSuccess {
@@ -371,9 +437,9 @@ class MainViewModel @Inject constructor(
     fun deleteCurrentSubmission() {
         val submissionId = state.value.submissionId ?: return
         submissionJob?.cancel()
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
-            runCatching {
+            accountRunCatching {
                 submissions.deleteSubmission(submissionId)
                 listMemories(state.value) to api.listInsights()
             }.onSuccess { (memoryResponse, insightResponse) ->
@@ -404,9 +470,9 @@ class MainViewModel @Inject constructor(
     }
 
     fun clearAllMemories() {
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
-            runCatching { submissions.clearMemories() }
+            accountRunCatching { submissions.clearMemories() }
                 .onSuccess { cleared ->
                     mutableState.update {
                         it.copy(
@@ -423,9 +489,9 @@ class MainViewModel @Inject constructor(
     }
 
     fun requestAccountExport() {
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
-            runCatching { submissions.prepareAccountExport() }
+            accountRunCatching { submissions.prepareAccountExport() }
                 .onSuccess { payload ->
                     mutableState.update { it.copy(isDataOperationPending = false, pendingExport = payload) }
                 }
@@ -439,9 +505,9 @@ class MainViewModel @Inject constructor(
             mutableState.update { it.copy(pendingExport = null, dataMessage = "已取消导出") }
             return
         }
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
-            runCatching { submissions.writeAccountExport(uri, payload) }
+            accountRunCatching { submissions.writeAccountExport(uri, payload) }
                 .onSuccess {
                     mutableState.update {
                         it.copy(isDataOperationPending = false, pendingExport = null, dataMessage = "数据已导出")
@@ -456,9 +522,9 @@ class MainViewModel @Inject constructor(
 
     fun deleteAccount() {
         submissionJob?.cancel()
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
-            runCatching { submissions.deleteAccount() }
+            accountRunCatching { submissions.deleteAccount() }
                 .onSuccess { mutableState.value = MainUiState(accountDeleted = true, dataMessage = "账户及云端数据已删除") }
                 .onFailure { error -> finishDataRequest(error, "账户删除失败") }
         }
@@ -485,14 +551,15 @@ class MainViewModel @Inject constructor(
     }
 
     fun editCard(cardId: String, fields: Map<String, String>, targetAccountId: String, resolvedIssues: Set<String>) {
+        if (cardId in state.value.readOnlyCardIds) return
         val card = state.value.cards.singleOrNull { it.id == cardId } ?: return
         if (targetAccountId.isBlank()) {
             mutableState.update { it.copy(message = "必须选择目标账户") }
             return
         }
         setCardPending(cardId, true)
-        viewModelScope.launch {
-            runCatching { submissions.edit(cardId, card.version, fields, targetAccountId, resolvedIssues.toList()) }
+        accountScope.launch {
+            accountRunCatching { submissions.edit(cardId, card.version, fields, targetAccountId, resolvedIssues.toList()) }
                 .onSuccess { updated ->
                     invalidateProviderReview(cardId)
                     replaceCard(updated, "已保存第 ${updated.version} 版；请重新检查设备数据")
@@ -502,23 +569,25 @@ class MainViewModel @Inject constructor(
     }
 
     fun confirm(cardId: String) {
+        if (cardId in state.value.readOnlyCardIds) return
         val card = state.value.cards.singleOrNull { it.id == cardId } ?: return
         if (card.reviewKey() !in state.value.providerReviewedVersions) {
             mutableState.update { it.copy(message = "确认前请先检查设备中的重复项、冲突和目标账户") }
             return
         }
         setCardPending(cardId, true)
-        viewModelScope.launch {
-            runCatching { submissions.confirm(card.id, card.version) }
+        accountScope.launch {
+            accountRunCatching { submissions.confirm(card.id, card.version) }
                 .onSuccess { confirmed -> replaceCard(confirmed, "已确认当前卡片版本") }
                 .onFailure { error -> finishCardRequest(cardId, error.message ?: "卡片确认失败") }
         }
     }
 
     fun cancelCard(cardId: String) {
+        if (cardId in state.value.readOnlyCardIds) return
         setCardPending(cardId, true)
-        viewModelScope.launch {
-            runCatching { submissions.cancel(cardId) }
+        accountScope.launch {
+            accountRunCatching { submissions.cancel(cardId) }
                 .onSuccess {
                     mutableState.update { current ->
                         current.copy(
@@ -540,10 +609,11 @@ class MainViewModel @Inject constructor(
             errorCode = "permission_denied",
             errorMessage = "用户未授予本次系统写入所需权限",
         )
-        viewModelScope.launch { recordOutcome(cardId, request, ActionStatus.FAILED, "未授予权限，未写入系统；授权后可重新确认") }
+        accountScope.launch { recordOutcome(cardId, request, ActionStatus.FAILED, "未授予权限，未写入系统；授权后可重新确认") }
     }
 
     suspend fun execute(cardId: String) {
+        if (cardId in state.value.readOnlyCardIds) return
         val card = state.value.cards.single { it.id == cardId }
         require(card.status == ActionStatus.CONFIRMED)
         if (card.reviewKey() !in state.value.providerReviewedVersions) {
@@ -556,7 +626,7 @@ class MainViewModel @Inject constructor(
         }
         setCardPending(cardId, true)
         mutableState.update { current -> current.copy(cards = current.cards.map { if (it.id == cardId) it.copy(status = ActionStatus.EXECUTING) else it }) }
-        val result = runCatching { providerExecutor.execute(requireNotNull(card.confirmedSnapshot)) }
+        val result = accountRunCatching { providerExecutor.execute(requireNotNull(card.confirmedSnapshot)) }
             .getOrElse { ProviderResult.Failed("provider_error", it.message ?: "Android Provider 写入失败") }
         when (result) {
             is ProviderResult.Succeeded -> recordOutcome(
@@ -576,10 +646,10 @@ class MainViewModel @Inject constructor(
 
     fun retryReceipt(cardId: String) {
         val request = state.value.pendingReceipts[cardId] ?: return
-        viewModelScope.launch {
-            val report = runCatching { submissions.reportExecution(cardId, request) }
+        accountScope.launch {
+            val report = accountRunCatching { submissions.reportExecution(cardId, request) }
             if (report.isSuccess) {
-                val refreshed = runCatching { api.listInsights() }
+                val refreshed = accountRunCatching { api.listInsights() }
                 mutableState.update {
                     it.copy(
                         pendingReceipts = it.pendingReceipts - cardId,
@@ -595,8 +665,9 @@ class MainViewModel @Inject constructor(
     }
 
     fun preflightProvider(cardId: String) {
+        if (cardId in state.value.readOnlyCardIds) return
         val card = state.value.cards.singleOrNull { it.id == cardId } ?: return
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update {
                 it.copy(
                     pendingProviderReviewIds = it.pendingProviderReviewIds + cardId,
@@ -604,7 +675,7 @@ class MainViewModel @Inject constructor(
                     message = "正在读取设备中的相关记录…",
                 )
             }
-            runCatching { providerExecutor.inspect(card) }
+            accountRunCatching { providerExecutor.inspect(card) }
                 .onSuccess { result ->
                     if (result is ProviderPreflightResult.Clear) approveProviderReview(result.cardId, result.version, "设备数据检查完成")
                     else mutableState.update {
@@ -627,8 +698,9 @@ class MainViewModel @Inject constructor(
     }
 
     fun loadProviderTargets(cardId: String) {
+        if (cardId in state.value.readOnlyCardIds) return
         val card = state.value.cards.singleOrNull { it.id == cardId } ?: return
-        viewModelScope.launch {
+        accountScope.launch {
             mutableState.update {
                 it.copy(
                     pendingProviderReviewIds = it.pendingProviderReviewIds + cardId,
@@ -636,7 +708,7 @@ class MainViewModel @Inject constructor(
                     message = "正在读取设备可写入账户…",
                 )
             }
-            runCatching { providerExecutor.targets(card) }
+            accountRunCatching { providerExecutor.targets(card) }
                 .onSuccess { targets ->
                     mutableState.update {
                         it.copy(
@@ -661,8 +733,8 @@ class MainViewModel @Inject constructor(
         val selection = state.value.providerTargetSelection ?: return
         val card = state.value.cards.singleOrNull { it.id == selection.cardId && it.version == selection.version } ?: return
         setCardPending(card.id, true)
-        viewModelScope.launch {
-            runCatching {
+        accountScope.launch {
+            accountRunCatching {
                 submissions.edit(
                     cardId = card.id,
                     expectedVersion = card.version,
@@ -687,8 +759,8 @@ class MainViewModel @Inject constructor(
 
     private fun approveProviderReview(cardId: String, version: Int, message: String) {
         val card = state.value.cards.singleOrNull { it.id == cardId && it.version == version } ?: return
-        viewModelScope.launch {
-            runCatching { submissions.markProviderReviewed(cardId, version) }
+        accountScope.launch {
+            accountRunCatching { submissions.markProviderReviewed(cardId, version) }
                 .onSuccess {
                     mutableState.update {
                         it.copy(
@@ -719,8 +791,8 @@ class MainViewModel @Inject constructor(
             return
         }
         setCardPending(card.id, true)
-        viewModelScope.launch {
-            runCatching {
+        accountScope.launch {
+            accountRunCatching {
                 submissions.edit(
                     cardId = card.id,
                     expectedVersion = card.version,
@@ -753,8 +825,8 @@ class MainViewModel @Inject constructor(
     }
 
     private suspend fun recordOutcome(cardId: String, request: ActionReceiptRequest, status: ActionStatus, successMessage: String) {
-        val report = runCatching { submissions.reportExecution(cardId, request) }
-        val refreshed = if (report.isSuccess && status == ActionStatus.SUCCEEDED) runCatching { api.listInsights() } else null
+        val report = accountRunCatching { submissions.reportExecution(cardId, request) }
+        val refreshed = if (report.isSuccess && status == ActionStatus.SUCCEEDED) accountRunCatching { api.listInsights() } else null
         mutableState.update { current ->
             current.copy(
                 cards = current.cards.map { if (it.id == cardId) it.copy(status = status) else it },
@@ -790,3 +862,21 @@ class MainViewModel @Inject constructor(
 }
 
 private fun ActionCard.reviewKey() = "$id:$version"
+
+private inline fun <T> accountRunCatching(block: () -> T): Result<T> = try { Result.success(block()) }
+catch (error: CancellationException) { throw error }
+catch (error: Throwable) { Result.failure(error) }
+
+internal fun mergeHistory(
+    previous: List<SubmissionSummaryResponse>,
+    remote: List<SubmissionSummaryResponse>,
+    local: List<SubmissionSummaryResponse>,
+    view: String,
+): List<SubmissionSummaryResponse> {
+    val merged = (previous + local + remote).associateBy { it.id }.toMutableMap()
+    // Only unsent uploads and unsynchronized device outcomes override cloud summaries.
+    local.filter { it.status == "pending_upload" || (it.actionCounts["executing"] ?: 0) > 0 }
+        .forEach { merged[it.id] = it }
+    return merged.values.filter { view == "all" || it.needsAttention }
+        .sortedWith(compareByDescending<SubmissionSummaryResponse> { it.createdAt }.thenByDescending { it.id })
+}
