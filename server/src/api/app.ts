@@ -22,6 +22,7 @@ import { DomainError } from "../domain/errors.ts";
 import type { ActionCard } from "../domain/model.ts";
 import { createMemory } from "../domain/memory.ts";
 import { prepareSubmission, sameSubmissionContent, SCREENSHOT_CONTENT_TYPES } from "../domain/submission.ts";
+import { submissionHistoryInput } from "../domain/submission-history.ts";
 import { EvidenceBackedInsightGenerator, type InsightGenerator } from "../insight/insight-generator.ts";
 import { InsightService } from "../insight/insight-service.ts";
 import { cardEditInput, cardInput, cardVersionInput, executionInput, insightSearchInput, memoryInput, memoryRevisionInput, memorySearchInput, submissionFieldsInput } from "./schemas.ts";
@@ -82,6 +83,12 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
     if (identity.sessionId) request.sessionId = identity.sessionId;
   });
   app.get("/health", { config: { public: true } }, async () => ({ status: "ok" }));
+  app.get("/v1/submissions", async (request) => {
+    const input = submissionHistoryInput.parse(request.query);
+    return submissions.list(request.accountId, {
+      view: input.view, limit: input.limit, ...(input.cursor ? { cursor: input.cursor } : {}),
+    });
+  });
   app.post("/v1/submissions", async (request, reply) => {
     const fields: Record<string, string> = {};
     let image: Buffer | undefined;

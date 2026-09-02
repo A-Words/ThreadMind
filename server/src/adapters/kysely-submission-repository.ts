@@ -2,6 +2,7 @@ import type { Insertable, Kysely, Selectable } from "kysely";
 import { DomainError } from "../domain/errors.ts";
 import type { BackgroundJob, ScreenshotSubmission } from "../domain/model.ts";
 import { sameSubmissionContent } from "../domain/submission.ts";
+import { attentionActionStatuses, emptyActionCounts, historyPage, type SubmissionHistoryQuery } from "../domain/submission-history.ts";
 import { retryTransient, withAccount } from "../database/account-transaction.ts";
 import type { BackgroundJobsTable, ScreenshotSubmissionsTable, ThreadMindDatabase } from "../database/schema.ts";
 import type { SubmissionRepository } from "./submission-repository.ts";
@@ -9,6 +10,37 @@ import { toExtraction } from "./kysely-submission-processing-repository.ts";
 
 export class KyselySubmissionRepository implements SubmissionRepository {
   constructor(private readonly database: Kysely<ThreadMindDatabase>) {}
+
+  async list(accountId: string, query: SubmissionHistoryQuery) {
+    return retryTransient(() => withAccount(this.database, accountId, async (tx) => {
+      let selection = tx.selectFrom("threadmind.screenshot_submissions as s")
+        .select(["s.id", "s.status", "s.submission_source", "s.created_at", "s.updated_at"])
+        .where("s.account_id", "=", accountId).where("s.status", "!=", "deleted");
+      if (query.view === "attention") selection = selection.where((eb) => eb.or([
+        eb("s.status", "in", ["uploaded", "processing", "failed"]),
+        eb.exists(eb.selectFrom("threadmind.action_cards as c").select("c.id")
+          .whereRef("c.submission_id", "=", "s.id").where("c.account_id", "=", accountId)
+          .where("c.status", "in", attentionActionStatuses)),
+      ]));
+      if (query.cursor) {
+        const cursor = query.cursor;
+        selection = selection.where((eb) => eb.or([
+          eb("s.created_at", "<", new Date(cursor.createdAt)),
+          eb.and([eb("s.created_at", "=", new Date(cursor.createdAt)), eb("s.id", "<", cursor.id)]),
+        ]));
+      }
+      const rows = await selection.orderBy("s.created_at", "desc").orderBy("s.id", "desc").limit(query.limit + 1).execute();
+      const counts = rows.length ? await tx.selectFrom("threadmind.action_cards")
+        .select(["submission_id", "status", (eb) => eb.fn.countAll<number>().as("count")])
+        .where("account_id", "=", accountId).where("submission_id", "in", rows.map((s) => s.id))
+        .groupBy(["submission_id", "status"]).execute() : [];
+      return historyPage(rows.map((row) => ({
+        id: row.id, status: row.status, source: row.submission_source,
+        createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+        actionCounts: { ...emptyActionCounts(), ...Object.fromEntries(counts.filter((c) => c.submission_id === row.id).map((c) => [c.status, Number(c.count)])) },
+      })), query.limit);
+    }));
+  }
 
   async find(accountId: string, id: string): Promise<ScreenshotSubmission | undefined> {
     return retryTransient(() => withAccount(this.database, accountId, async (transaction) => {

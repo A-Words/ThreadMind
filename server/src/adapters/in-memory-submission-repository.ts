@@ -1,11 +1,29 @@
 import { DomainError } from "../domain/errors.ts";
 import type { BackgroundJob, ScreenshotSubmission } from "../domain/model.ts";
 import { sameSubmissionContent } from "../domain/submission.ts";
+import { attentionActionStatuses, emptyActionCounts, historyPage, type SubmissionHistoryQuery } from "../domain/submission-history.ts";
 import type { InMemoryStore } from "./in-memory-store.ts";
 import type { SubmissionRepository } from "./submission-repository.ts";
 
 export class InMemorySubmissionRepository implements SubmissionRepository {
   constructor(private readonly store: InMemoryStore) {}
+
+  async list(accountId: string, query: SubmissionHistoryQuery) {
+    const rows = [...this.store.submissions.values()]
+      .filter((s) => s.accountId === accountId && s.status !== "deleted")
+      .map((s) => {
+        const actionCounts = emptyActionCounts();
+        for (const card of this.store.cards.values()) {
+          if (card.accountId === accountId && card.submissionId === s.id) actionCounts[card.status]! += 1;
+        }
+        return { id: s.id, status: s.status, source: s.source, createdAt: s.createdAt, updatedAt: s.updatedAt, actionCounts };
+      })
+      .filter((s) => query.view === "all" || ["uploaded", "processing", "failed"].includes(s.status)
+        || attentionActionStatuses.some((status) => s.actionCounts[status]! > 0))
+      .filter((s) => !query.cursor || s.createdAt < query.cursor.createdAt || (s.createdAt === query.cursor.createdAt && s.id < query.cursor.id))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    return historyPage(rows, query.limit);
+  }
 
   async find(accountId: string, id: string): Promise<ScreenshotSubmission | undefined> {
     const submission = this.store.submissions.get(id);
