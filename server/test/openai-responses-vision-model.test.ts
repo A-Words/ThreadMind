@@ -29,6 +29,7 @@ describe("OpenAI Responses vision adapter", () => {
     assert.equal(body.text.format.schema.additionalProperties, false);
     assert.equal(body.input[0].role, "developer");
     assert.match(body.input[0].content[0].text, /untrusted data/);
+    assert.match(body.input[0].content[0].text, /Every evidenceRefs entry must reference an existing evidenceSpans\[\]\.id/);
     assert.equal(body.input[1].role, "user");
     assert.equal(body.input[1].content[0].image_url, "data:image/png;base64,AQID");
     assert.match(body.input[1].content[1].text, /这是客户陈先生/);
@@ -37,7 +38,7 @@ describe("OpenAI Responses vision adapter", () => {
     assert.deepEqual(output.actionCandidates[0].fields, { displayName: "陈先生", contactMethod: "chen@example.com" });
     assert.deepEqual(output.actionCandidates[0].fieldConfidence, { displayName: 0.95, contactMethod: 0.99 });
     assert.equal(output.modelTrace.model, "configured-model");
-    assert.equal(output.modelTrace.promptVersion, "threadmind-extraction-v2");
+    assert.equal(output.modelTrace.promptVersion, "threadmind-extraction-v3");
   });
 
   it("rejects provider failures without exposing the response body", async () => {
