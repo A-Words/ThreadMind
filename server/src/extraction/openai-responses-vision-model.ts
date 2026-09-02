@@ -50,6 +50,7 @@ export class OpenAIResponsesVisionModel implements VisionExtractionModel {
         headers: {
           authorization: `Bearer ${this.options.apiKey}`,
           "content-type": "application/json",
+          "user-agent": "ThreadMind/0.1.0",
         },
         body: JSON.stringify({
           model: this.options.model,

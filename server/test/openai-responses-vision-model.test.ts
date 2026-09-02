@@ -21,6 +21,7 @@ describe("OpenAI Responses vision adapter", () => {
     }) as Record<string, any>;
 
     const body = JSON.parse(String(request?.body));
+    assert.equal(new Headers(request?.headers).get("user-agent"), "ThreadMind/0.1.0");
     assert.equal(body.model, "configured-model");
     assert.equal(body.store, false);
     assert.equal(body.text.format.type, "json_schema");
