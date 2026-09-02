@@ -1,6 +1,6 @@
 # 登录后 Material 3 工作区
 
-状态：实施中。日期：2026-09-03。
+状态：实现与自动化回归已完成；真实账号全链路验收待登录。日期：2026-09-03。
 
 ## 页面与视觉约定
 
@@ -26,8 +26,12 @@ GET /v1/submissions?view=all|attention&limit=20&cursor=…，返回 {items,nextC
 
 items 仅含 id、createdAt、updatedAt、source、status、actionCounts（各状态数量），不含截图地址、正文、补充文本或模型信息。attention 包含 uploaded/processing/failed 提交，或有 draft/blocked/ready/confirmed/executing 卡片的提交。已删除记录不返回。详情复用现有接口。
 
+PostgreSQL 游标保留原始微秒精度，不能先转换为 JavaScript Date 后截断；Android 以 Instant 比较时间，兼容本地毫秒与云端微秒表示。成功的云端页面为准，只合入待上传任务与本机待同步回执；网络失败才使用普通缓存兜底，避免刷新后复活已删除记录。
+
 所有查询通过 verified JWT → withAccount → 强制 RLS，并显式限定账户；不新增公共权限、不修改云端业务表。每页批量查询卡片数量，不逐条抓取详情。
 
 ## 验证与提交
 
 依次提交历史接口、导航主题、截图与行动、概览记忆洞察设置、验收修正。测试覆盖分页/隔离、Room 迁移、远端恢复不上传、状态恢复、确认与回执安全、深浅色/窄屏/横屏/200% 字体/输入法。保留 emulator-5554 的现有登录与数据，不卸载；使用合成截图与明确测试目标，不修改真实联系人或日历。
+
+实际验证范围、命令和剩余人工验收见 [Material 3 验收记录](../testing/material3-workspace.md)。

@@ -40,8 +40,10 @@ fun OverviewPage(state: MainUiState, onNew: () -> Unit, onSubmission: (String) -
         state.historyError?.let { item { InfoPanel(it, "重试", onRefresh, error = true) } }
         item { SectionHeading("值得关注", "全部洞察", onInsights) }
         val insightItems = state.insights.flatMap { bundle -> bundle.items.mapIndexed { index, item -> Triple(bundle.id, index, item) } }.take(3)
+        val insightError = state.insightMessage?.takeUnless { it.startsWith("已刷新") }
+        insightError?.let { item { InfoPanel(presentationMessage(it), "查看洞察", onInsights, error = true) } }
         if (state.isInsightLoading && insightItems.isEmpty()) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (insightItems.isEmpty() && !state.isInsightLoading) item {
+        if (insightItems.isEmpty() && !state.isInsightLoading && insightError == null) item {
             EmptyPanel("让建议建立在真实行动上", "成功完成一张行动卡后，这里会出现有依据的洞察与下一步建议。")
         }
         items(insightItems, key = { "${it.first}:${it.second}" }) { (bundleId, index, insight) ->
@@ -76,7 +78,7 @@ fun HistoryPage(state: MainUiState, onFilter: (String) -> Unit, onRefresh: () ->
     WorkspaceList {
         item { PageHeader("行动与记录", "每一次对话，都可以回来继续。") }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = state.historyView == "attention", onClick = { onFilter("attention") }, label = { Text("待处理") })
                 FilterChip(selected = state.historyView == "all", onClick = { onFilter("all") }, label = { Text("全部记录") })
                 TextButton(onClick = onRefresh, enabled = !state.isHistoryLoading) { Text("刷新") }

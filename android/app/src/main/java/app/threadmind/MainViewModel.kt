@@ -99,6 +99,7 @@ private fun progressMessage(progress: SubmissionProgress) = when (progress.statu
     "processing" -> "正在识别对话和行动依据…"
     "ready" -> "分析完成：${progress.cards.size} 张待审核卡片，云端原图已删除"
     "failed" -> "这次分析未能完成，请重新选择截图；云端原图将被清理"
+    "deleted" -> "这条来源已删除或当前账号无法访问。"
     else -> "正在处理提交"
 }
 
@@ -115,6 +116,7 @@ class MainViewModel @Inject constructor(
     private var submissionJob: Job? = null
     private var accountScope = CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
     private var historyJob: Job? = null
+    private var memoryJob: Job? = null
 
     fun switchAccount(accountId: String?) {
         if (state.value.accountId == accountId) return
@@ -122,8 +124,11 @@ class MainViewModel @Inject constructor(
         accountScope = CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
         val shared = state.value.selectedImage.takeIf { state.value.accountId == null }
         val restore = savedState.get<String>("account") == accountId
-        mutableState.value = MainUiState(accountId = accountId, selectedImage = shared,
-            selectedImageSource = if (shared != null) "android_share" else "in_app",
+        val draftUri = if (restore) savedState.get<String>("draftUri")?.let(Uri::parse) else null
+        mutableState.value = MainUiState(accountId = accountId, selectedImage = shared ?: draftUri,
+            selectedImageSource = if (shared != null) "android_share" else if (restore) savedState["draftSource"] ?: "in_app" else "in_app",
+            supplementalText = if (restore) savedState["draftText"] ?: "" else "",
+            historyView = if (restore) savedState["historyView"] ?: "attention" else "attention",
             memorySearch = if (restore) savedState["memorySearch"] ?: "" else "",
             memorySubjectRef = if (restore) savedState["memorySubject"] ?: "" else "",
             memoryType = if (restore) savedState["memoryType"] else null,
@@ -131,10 +136,15 @@ class MainViewModel @Inject constructor(
         )
         if (!restore) savedState.keys().forEach { savedState.remove<Any>(it) }
         savedState["account"] = accountId
+        if (shared != null) {
+            savedState["draftUri"] = shared.toString()
+            savedState["draftSource"] = "android_share"
+        }
     }
 
     fun setHistoryView(view: String) {
         if (state.value.historyView == view) return
+        savedState["historyView"] = view
         mutableState.update { it.copy(historyView = view, history = emptyList(), historyCursor = null) }
         refreshHistory()
     }
@@ -157,7 +167,7 @@ class MainViewModel @Inject constructor(
                 }
             }.onFailure {
                 mutableState.update { current -> current.copy(isHistoryLoading = false,
-                    history = mergeHistory(current.history, emptyList(), local, view),
+                    history = mergeHistory(current.history, local, local, view),
                     historyError = "暂时无法更新记录，已保留本机内容。请检查网络后重试。") }
             }
         }
@@ -185,7 +195,7 @@ class MainViewModel @Inject constructor(
     fun importImage(uri: Uri?) = selectImage(uri, "in_app")
     fun importSharedImage(uri: Uri?) = selectImage(uri, "android_share")
     fun clearSelectedImage() = selectImage(null, "in_app")
-    fun setSupplementalText(value: String) = mutableState.update { it.copy(supplementalText = value) }
+    fun setSupplementalText(value: String) { savedState["draftText"] = value; mutableState.update { it.copy(supplementalText = value) } }
     fun showCards(cards: List<ActionCard>) = mutableState.update { it.copy(cards = cards) }
     fun setMemorySearch(value: String) { savedState["memorySearch"] = value; mutableState.update { it.copy(memorySearch = value) } }
     fun setMemorySubjectRef(value: String) { savedState["memorySubject"] = value; mutableState.update { it.copy(memorySubjectRef = value) } }
@@ -194,6 +204,9 @@ class MainViewModel @Inject constructor(
 
     private fun selectImage(uri: Uri?, source: String) {
         submissionJob?.cancel()
+        savedState["draftUri"] = uri?.toString()
+        savedState["draftSource"] = source
+        if (uri == null) { savedState["draftText"] = ""; mutableState.update { it.copy(supplementalText = "") } }
         mutableState.update {
             it.copy(
                 selectedImage = uri,
@@ -240,6 +253,8 @@ class MainViewModel @Inject constructor(
                     supplementalText = current.supplementalText,
                 )
             }.onSuccess {
+                savedState["draftUri"] = null
+                savedState["draftText"] = ""
                 mutableState.update { state -> state.copy(selectedImage = null, supplementalText = "") }
                 refreshHistory()
                 monitorSubmission(it)
@@ -261,10 +276,9 @@ class MainViewModel @Inject constructor(
 
     private suspend fun monitorSubmission(initial: SubmissionProgress) {
         var progress = initial
-        if (progress.status == "ready" && progress.cards.isEmpty()) progress = submissions.refresh(progress.submissionId)
         applySubmission(progress)
         repeat(MAX_POLL_ATTEMPTS) {
-            if (progress.status == "ready" || progress.status == "failed") return
+            if (progress.status in setOf("ready", "failed", "deleted") || progress.syncMessage != null) return
             delay(POLL_INTERVAL_MILLIS)
             progress = submissions.refresh(progress.submissionId)
             applySubmission(progress)
@@ -280,10 +294,10 @@ class MainViewModel @Inject constructor(
     private fun applySubmission(progress: SubmissionProgress) = mutableState.update { current ->
         if (current.submissionId != progress.submissionId) current else current.copy(
             submissionStatus = progress.status,
-            isSubmissionPending = progress.status !in setOf("ready", "failed"),
-            submissionMessage = progressMessage(progress),
-            cards = if (progress.status == "ready") progress.cards else current.cards,
-            analysis = if (progress.status == "ready") progress.analysis else current.analysis,
+            isSubmissionPending = progress.status !in setOf("ready", "failed", "deleted") && progress.syncMessage == null,
+            submissionMessage = progress.syncMessage ?: progressMessage(progress),
+            cards = if (progress.status == "ready") progress.cards else emptyList(),
+            analysis = if (progress.status == "ready") progress.analysis else null,
             pendingReceipts = progress.pendingReceipts,
             providerReviewedVersions = progress.providerReviewedVersions,
             readOnlyCardIds = if (!progress.remoteOnly) emptySet() else progress.cards.filter {
@@ -293,9 +307,15 @@ class MainViewModel @Inject constructor(
     }
 
     private fun finishSubmissionFailure(submissionId: String, error: Throwable) = mutableState.update { current ->
+        val unavailable = error is retrofit2.HttpException && error.code() == 404
         if (current.submissionId != submissionId) current else current.copy(
             isSubmissionPending = false,
-            submissionMessage = if (error is retrofit2.HttpException && error.code() == 404) "这条来源已删除或当前账号无法访问。" else "暂时无法同步分析状态，请检查网络后刷新；不会重复上传。",
+            submissionStatus = if (unavailable) "deleted" else current.submissionStatus,
+            cards = if (unavailable) emptyList() else current.cards,
+            analysis = if (unavailable) null else current.analysis,
+            providerReview = if (unavailable) null else current.providerReview,
+            providerTargetSelection = if (unavailable) null else current.providerTargetSelection,
+            submissionMessage = if (unavailable) "这条来源已删除或当前账号无法访问。" else "暂时无法同步分析状态，请检查网络后刷新；不会重复上传。",
         )
     }
 
@@ -339,7 +359,8 @@ class MainViewModel @Inject constructor(
 
     fun refreshMemories() {
         val filters = state.value
-        accountScope.launch {
+        memoryJob?.cancel()
+        memoryJob = accountScope.launch {
             mutableState.update { it.copy(isMemoryLoading = true, memoryMessage = null) }
             accountRunCatching { listMemories(filters) }
                 .onSuccess { response ->
@@ -363,6 +384,10 @@ class MainViewModel @Inject constructor(
     }
 
     fun clearMemoryFilters() {
+        savedState["memorySearch"] = ""
+        savedState["memorySubject"] = ""
+        savedState["memoryType"] = null
+        savedState["memoryTime"] = "ALL"
         mutableState.update {
             it.copy(
                 memorySearch = "",
@@ -439,10 +464,8 @@ class MainViewModel @Inject constructor(
         submissionJob?.cancel()
         accountScope.launch {
             mutableState.update { it.copy(isDataOperationPending = true, dataMessage = null) }
-            accountRunCatching {
-                submissions.deleteSubmission(submissionId)
-                listMemories(state.value) to api.listInsights()
-            }.onSuccess { (memoryResponse, insightResponse) ->
+            accountRunCatching { submissions.deleteSubmission(submissionId) }.onSuccess {
+                savedState["submissionId"] = null
                 mutableState.update {
                     it.copy(
                         selectedImage = null,
@@ -459,12 +482,16 @@ class MainViewModel @Inject constructor(
                         providerReviewedVersions = emptySet(),
                         pendingProviderReviewIds = emptySet(),
                         providerReview = null,
-                        memories = memoryResponse.items,
-                        insights = insightResponse.items,
+                        memories = emptyList(),
+                        insights = it.insights.filterNot { bundle -> bundle.submissionId == submissionId },
                         isDataOperationPending = false,
                         dataMessage = "本次提交及其派生数据已删除",
+                        history = it.history.filterNot { row -> row.id == submissionId },
+                        attention = it.attention.filterNot { row -> row.id == submissionId },
                     )
                 }
+                refreshMemories()
+                refreshInsights()
             }.onFailure { error -> finishDataRequest(error, "提交删除失败") }
         }
     }
@@ -873,10 +900,11 @@ internal fun mergeHistory(
     local: List<SubmissionSummaryResponse>,
     view: String,
 ): List<SubmissionSummaryResponse> {
-    val merged = (previous + local + remote).associateBy { it.id }.toMutableMap()
+    // A successful cloud page is authoritative. Do not resurrect deleted or unpaged cached rows.
+    val merged = (previous + remote).associateBy { it.id }.toMutableMap()
     // Only unsent uploads and unsynchronized device outcomes override cloud summaries.
-    local.filter { it.status == "pending_upload" || (it.actionCounts["executing"] ?: 0) > 0 }
+    local.filter { it.status == "pending_upload" || it.hasPendingDeviceReceipt }
         .forEach { merged[it.id] = it }
     return merged.values.filter { view == "all" || it.needsAttention }
-        .sortedWith(compareByDescending<SubmissionSummaryResponse> { it.createdAt }.thenByDescending { it.id })
+        .sortedWith(compareByDescending<SubmissionSummaryResponse> { java.time.Instant.parse(it.createdAt) }.thenByDescending { it.id })
 }

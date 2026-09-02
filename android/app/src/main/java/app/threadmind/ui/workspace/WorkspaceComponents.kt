@@ -7,7 +7,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -62,7 +62,7 @@ fun InfoPanel(text: String, action: String? = null, onAction: () -> Unit = {}, e
     Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
         color = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text, color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface)
+            Text(presentationMessage(text), color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface)
             if (action != null) TextButton(onClick = onAction) { Text(action) }
         }
     }
@@ -87,7 +87,7 @@ fun SummaryCard(title: String, description: String, label: String, onClick: () -
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Icon(Icons.Outlined.ArrowForward, "查看详情", modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Outlined.ArrowForward, "查看详情", modifier = Modifier.size(20.dp))
             }
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -125,3 +125,9 @@ fun ActionStatus.label(): String = when (this) {
 }
 fun ActionCard.title(): String = fields["title"]?.takeIf(String::isNotBlank)
     ?: fields["displayName"]?.takeIf(String::isNotBlank) ?: type.label()
+
+fun presentationMessage(message: String): String = when {
+    message.contains("http", true) || message.contains("Exception") || message.contains("java.") || message.contains("Socket") -> "操作暂未完成，请检查网络后重试。"
+    message.startsWith("已写入系统，记录") -> "已成功写入系统"
+    else -> message
+}

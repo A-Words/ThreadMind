@@ -101,11 +101,13 @@ private fun issueLabel(value: String, type: ActionType): String {
 @Composable
 private fun DateTimeField(label: String, value: String, timezone: String, enabled: Boolean, onChange: (String) -> Unit) {
     var stage by remember { mutableIntStateOf(0) }
-    val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.systemDefault())
-    val existing = runCatching { Instant.parse(value).atZone(zone) }.getOrDefault(ZonedDateTime.now(zone))
+    val zone = runCatching { ZoneId.of(timezone) }.getOrNull()
+    if (zone == null) { InfoPanel("请先填写有效的时区，再选择$label", error = true); return }
+    val parsed = runCatching { Instant.parse(value).atZone(zone) }.getOrNull()
+    val existing = parsed ?: ZonedDateTime.now(zone)
     var date by remember { mutableStateOf(existing.toLocalDate()) }
     OutlinedButton(onClick = { stage = 1 }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-        Text("$label：${if (value.isBlank()) "请选择" else runCatching { existing.format(java.time.format.DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm")) }.getOrDefault("请重新选择")}")
+        Text("$label：${if (parsed == null) "请选择" else parsed.format(java.time.format.DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm"))}")
     }
     if (stage == 1) {
         val picker = rememberDatePickerState(initialSelectedDateMillis = existing.toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())

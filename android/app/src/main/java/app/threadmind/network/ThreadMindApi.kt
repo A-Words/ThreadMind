@@ -44,6 +44,7 @@ data class SubmissionSummaryResponse(
     val source: String,
     val status: String,
     val actionCounts: Map<String, Int> = emptyMap(),
+    val hasPendingDeviceReceipt: Boolean = false,
 ) {
     val needsAttention: Boolean get() = status in setOf("pending_upload", "uploaded", "processing", "failed") ||
         actionCounts.any { (status, count) -> status in setOf("draft", "blocked", "ready", "confirmed", "executing") && count > 0 }

@@ -27,6 +27,7 @@ data class SubmissionProgress(
     val providerReviewedVersions: Set<String> = emptySet(),
     val analysis: ExtractionResponse? = null,
     val remoteOnly: Boolean = false,
+    val syncMessage: String? = null,
 )
 
 data class AccountExportPayload(
@@ -70,12 +71,12 @@ class AndroidSubmissionWorkflowRepository(
 ) : SubmissionWorkflowRepository {
     override suspend fun localHistory(): List<SubmissionSummaryResponse> {
         val accountId = auth.currentUserId() ?: return emptyList()
+        val receipts = dao.pendingReceipts(accountId).mapTo(mutableSetOf()) { it.actionCardId }
         return dao.history(accountId).map { row ->
             val cards = dao.cards(accountId, row.id)
-            val receipts = dao.pendingReceipts(accountId).mapTo(mutableSetOf()) { it.actionCardId }
             val counts = cards.groupingBy { if (it.id in receipts) "executing" else it.status }.eachCount()
             SubmissionSummaryResponse(row.id, java.time.Instant.ofEpochMilli(row.createdAtEpochMillis).toString(),
-                java.time.Instant.ofEpochMilli(row.updatedAtEpochMillis).toString(), row.source, row.status, counts)
+                java.time.Instant.ofEpochMilli(row.updatedAtEpochMillis).toString(), row.source, row.status, counts, cards.any { it.id in receipts })
         }
     }
 
@@ -126,7 +127,14 @@ class AndroidSubmissionWorkflowRepository(
     override suspend fun refresh(submissionId: String): SubmissionProgress {
         val accountId = requireNotNull(auth.currentUserId()) { "没有可用的登录会话" }
         scheduler.enqueueSubmission(accountId, submissionId)
-        syncEngine.syncSubmission(accountId, submissionId)
+        try {
+            syncEngine.syncSubmission(accountId, submissionId, surfaceErrors = true)
+        } catch (error: IOException) {
+            return localProgress(accountId, submissionId).copy(syncMessage = "网络暂不可用，当前显示本机记录。请稍后重试同步，不会重复创建分析。")
+        } catch (error: retrofit2.HttpException) {
+            if (error.code() == 404) throw error
+            return localProgress(accountId, submissionId).copy(syncMessage = "暂时无法与服务同步，当前显示本机记录。请稍后重试同步。")
+        }
         return localProgress(accountId, submissionId)
     }
 

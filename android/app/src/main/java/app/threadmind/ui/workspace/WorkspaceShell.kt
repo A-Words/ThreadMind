@@ -1,6 +1,8 @@
 package app.threadmind.ui.workspace
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
@@ -34,6 +36,7 @@ fun WorkspaceShell(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
+        val railItemHeight = if (maxHeight < 480.dp) 64.dp else 80.dp
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
@@ -58,11 +61,14 @@ fun WorkspaceShell(
                 text = { Text("分析截图") }, modifier = Modifier.testTag("new_analysis")) },
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding)) {
-                if (wide && detailTitle == null) NavigationRail {
+                if (wide && detailTitle == null) NavigationRail(
+                    Modifier.fillMaxHeight().verticalScroll(rememberScrollState()),
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                ) {
                     WorkspaceTab.entries.forEach { destination ->
                         NavigationRailItem(selected = tab == destination, onClick = { onTab(destination) },
                             icon = { Icon(destination.icon, null) }, label = { Text(destination.title) },
-                            modifier = Modifier.testTag("tab_${destination.name}"))
+                            modifier = Modifier.height(railItemHeight).testTag("tab_${destination.name}"))
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxHeight().imePadding()) { content() }

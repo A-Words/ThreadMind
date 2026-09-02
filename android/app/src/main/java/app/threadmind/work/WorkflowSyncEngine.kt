@@ -7,6 +7,7 @@ import app.threadmind.network.ActionCardResponse
 import app.threadmind.network.ActionReceiptRequest
 import app.threadmind.network.ThreadMindApi
 import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -23,7 +24,7 @@ class WorkflowSyncEngine @Inject constructor(
     private val dao: WorkflowDao,
     private val api: ThreadMindApi,
 ) {
-    suspend fun syncSubmission(accountId: String, submissionId: String): WorkflowSyncResult {
+    suspend fun syncSubmission(accountId: String, submissionId: String, surfaceErrors: Boolean = false): WorkflowSyncResult {
         if (auth.currentUserId() != accountId) return WorkflowSyncResult.FAILURE
         val local = dao.submission(accountId, submissionId) ?: return WorkflowSyncResult.SUCCESS
         return try {
@@ -74,6 +75,13 @@ class WorkflowSyncEngine @Inject constructor(
                 else -> WorkflowSyncResult.RETRY
             }
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (error is HttpException && error.code() == 404 && local.status != "pending_upload") {
+                dao.updateSubmissionStatus(accountId, submissionId, "deleted", null, System.currentTimeMillis())
+                if (surfaceErrors) throw error
+                return WorkflowSyncResult.SUCCESS
+            }
+            if (surfaceErrors) throw error
             if (error.isRetryable()) {
                 WorkflowSyncResult.RETRY
             } else {
@@ -94,6 +102,7 @@ class WorkflowSyncEngine @Inject constructor(
             dao.deletePendingReceipt(accountId, receiptId)
             WorkflowSyncResult.SUCCESS
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             if (error.isRetryable()) WorkflowSyncResult.RETRY else WorkflowSyncResult.FAILURE
         }
     }

@@ -58,6 +58,89 @@ class MainViewModelTest {
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
 
+    @Test fun `deleted remote source removes stale executable cards`() = runTest(dispatcher) {
+        val repository = FakeSubmissionWorkflowRepository(SubmissionProgress("submission-1", "ready", listOf(actionCard())))
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), repository)
+        viewModel.openSubmission("submission-1")
+        runCurrent()
+        repository.refreshFailure = retrofit2.HttpException(Response.error<Unit>(404, "{}".toResponseBody()))
+        viewModel.refreshSubmission()
+        runCurrent()
+        assertEquals("deleted", viewModel.state.value.submissionStatus)
+        assertEquals(emptyList<ActionCard>(), viewModel.state.value.cards)
+    }
+
+    @Test fun `successful submission deletion is not undone by memory refresh failure`() = runTest(dispatcher) {
+        val repository = FakeSubmissionWorkflowRepository(SubmissionProgress("submission-1", "ready", emptyList()))
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi().apply { memoryFailure = true }, repository)
+        viewModel.openSubmission("submission-1")
+        runCurrent()
+        viewModel.deleteCurrentSubmission()
+        runCurrent()
+        assertEquals(null, viewModel.state.value.submissionId)
+        assertEquals("本次提交及其派生数据已删除", viewModel.state.value.dataMessage)
+        assertEquals(false, viewModel.state.value.isDataOperationPending)
+    }
+
+    @Test fun `offline history preserves analysis state and offers sync without recreating upload`() = runTest(dispatcher) {
+        val repository = FakeSubmissionWorkflowRepository(SubmissionProgress("submission-1", "processing", emptyList(), syncMessage = "网络暂不可用"))
+        val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), repository)
+        viewModel.openSubmission("submission-1")
+        runCurrent()
+        assertEquals("processing", viewModel.state.value.submissionStatus)
+        assertEquals(false, viewModel.state.value.isSubmissionPending)
+        assertEquals("网络暂不可用", viewModel.state.value.submissionMessage)
+    }
+
+    @Test fun `memory failure does not block submission history`() = runTest(dispatcher) {
+        val api = FakeThreadMindApi().apply { memoryFailure = true }
+        val viewModel = MainViewModel(FakeProviderExecutor(), api, FakeSubmissionWorkflowRepository())
+        viewModel.checkBackend()
+        runCurrent()
+        assertEquals(BackendStatus.CONNECTED, viewModel.state.value.backendStatus)
+        assertEquals(false, viewModel.state.value.isHistoryLoading)
+        assertEquals("memory unavailable", viewModel.state.value.memoryMessage)
+    }
+
+    @Test fun `old account history response cannot repopulate the new account`() = runTest(dispatcher) {
+        val gate = kotlinx.coroutines.CompletableDeferred<app.threadmind.network.SubmissionHistoryResponse>()
+        val api = FakeThreadMindApi().apply { historyGate = gate }
+        val viewModel = MainViewModel(FakeProviderExecutor(), api, FakeSubmissionWorkflowRepository())
+        viewModel.switchAccount("account-a")
+        viewModel.refreshHistory()
+        runCurrent()
+        viewModel.switchAccount("account-b")
+        gate.complete(app.threadmind.network.SubmissionHistoryResponse(listOf(app.threadmind.network.SubmissionSummaryResponse("private", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "in_app", "ready"))))
+        runCurrent()
+        assertEquals("account-b", viewModel.state.value.accountId)
+        assertEquals(emptyList<app.threadmind.network.SubmissionSummaryResponse>(), viewModel.state.value.history)
+    }
+
+    @Test fun `confirmed cloud history without local review is not executable`() = runTest(dispatcher) {
+        val provider = FakeProviderExecutor()
+        val repository = FakeSubmissionWorkflowRepository(SubmissionProgress("submission-1", "ready", listOf(ActionCardPolicy.confirm(actionCard())), remoteOnly = true))
+        val viewModel = MainViewModel(provider, FakeThreadMindApi(), repository)
+        viewModel.openSubmission("submission-1")
+        runCurrent()
+        assertEquals(setOf("card-1"), viewModel.state.value.readOnlyCardIds)
+        viewModel.execute("card-1")
+        assertEquals(0, provider.executionCount)
+    }
+
+    @Test fun `saved filters restore only for their owner`() = runTest(dispatcher) {
+        val saved = androidx.lifecycle.SavedStateHandle()
+        val first = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), FakeSubmissionWorkflowRepository(), saved)
+        first.switchAccount("a")
+        first.setMemorySearch("private search")
+        first.setMemoryTimeFilter(MemoryTimeFilter.LAST_YEAR)
+        val restored = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), FakeSubmissionWorkflowRepository(), saved)
+        restored.switchAccount("a")
+        assertEquals("private search", restored.state.value.memorySearch)
+        assertEquals(MemoryTimeFilter.LAST_YEAR, restored.state.value.memoryTimeFilter)
+        restored.switchAccount("b")
+        assertEquals("", restored.state.value.memorySearch)
+    }
+
     @Test fun `backend check exposes authenticated API success`() = runTest(dispatcher) {
         val viewModel = MainViewModel(FakeProviderExecutor(), FakeThreadMindApi(), FakeSubmissionWorkflowRepository())
 
@@ -317,9 +400,13 @@ private class FakeSubmissionWorkflowRepository(
     var writtenExportUri: Uri? = null
     var accountDeleted = false
     val reviewedVersions = mutableSetOf<String>()
+    var refreshFailure: Throwable? = null
 
     override suspend fun submit(uri: Uri, submissionId: String, source: String, supplementalText: String) = error("unused")
-    override suspend fun refresh(submissionId: String): SubmissionProgress = restored ?: error("unused")
+    override suspend fun refresh(submissionId: String): SubmissionProgress {
+        refreshFailure?.let { throw it }
+        return restored ?: error("unused")
+    }
     override suspend fun restoreLatest(): SubmissionProgress? = restored
     override suspend fun edit(
         cardId: String,
@@ -359,7 +446,9 @@ private fun actionCard() = ActionCard(
 )
 
 private class FakeThreadMindApi : ThreadMindApi {
-    override suspend fun listSubmissions(view: String, limit: Int, cursor: String?) = app.threadmind.network.SubmissionHistoryResponse(emptyList())
+    var memoryFailure = false
+    var historyGate: kotlinx.coroutines.CompletableDeferred<app.threadmind.network.SubmissionHistoryResponse>? = null
+    override suspend fun listSubmissions(view: String, limit: Int, cursor: String?) = historyGate?.await() ?: app.threadmind.network.SubmissionHistoryResponse(emptyList())
     private var memory: MemoryRecordResponse? = memoryRecord()
     var lastMemorySearch: String? = null
     var lastMemorySubjectRef: String? = null
@@ -373,6 +462,7 @@ private class FakeThreadMindApi : ThreadMindApi {
         createdFrom: String?,
         createdTo: String?,
     ): MemoryListResponse {
+        if (memoryFailure) error("memory unavailable")
         lastMemorySearch = search
         lastMemorySubjectRef = subjectRef
         lastMemoryType = type

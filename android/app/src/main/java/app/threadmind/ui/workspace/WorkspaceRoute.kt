@@ -47,6 +47,7 @@ fun WorkspaceRoute(
         if (dirty) discardAction = action else { dirty = false; action() }
     }
     fun push(value: String) { navigate { stack = stack + value } }
+    fun startAnalysis() { navigate { viewModel.clearSelectedImage(); holder.removeState("new"); stack = stack + "new" } }
     fun back() { navigate { if (route == "new") viewModel.clearSelectedImage(); stack = stack.dropLast(1).ifEmpty { listOf("main") } } }
     fun openSubmission(id: String) { navigate { viewModel.openSubmission(id); stack = stack + "submission:$id" } }
 
@@ -70,6 +71,7 @@ fun WorkspaceRoute(
     }
     LaunchedEffect(authFeedback) { authFeedback?.let { snackbar.showSnackbar(it.message); onClearAuthFeedback() } }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(userMessage(it)); viewModel.clearMessage() } }
+    LaunchedEffect(state.dataMessage) { state.dataMessage?.let { snackbar.showSnackbar(presentationMessage(it)) } }
     BackHandler(route != "main") { back() }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -105,11 +107,11 @@ fun WorkspaceRoute(
     }
     WorkspaceShell(tab, detailTitle, snackbar,
         onTab = { next -> navigate { tabName = next.name } }, onBack = ::back,
-        onSettings = { push("settings") }, onNew = { push("new") }) {
+        onSettings = { push("settings") }, onNew = ::startAnalysis) {
         holder.SaveableStateProvider(if (route == "main") "main:$tabName" else route) {
             when {
                 route == "main" -> when (tab) {
-                    WorkspaceTab.OVERVIEW -> OverviewPage(state, { push("new") }, ::openSubmission,
+                    WorkspaceTab.OVERVIEW -> OverviewPage(state, ::startAnalysis, ::openSubmission,
                         { id, index -> push("insight:$id:$index") }, { tabName = WorkspaceTab.ACTIONS.name },
                         { tabName = WorkspaceTab.INSIGHTS.name }, { viewModel.refreshHistory() })
                     WorkspaceTab.ACTIONS -> HistoryPage(state, viewModel::setHistoryView, { viewModel.refreshHistory() }, { viewModel.refreshHistory(true) }, ::openSubmission)
@@ -120,9 +122,12 @@ fun WorkspaceRoute(
                     onUpload = {
                         dirty = false
                         viewModel.submitForAnalysis()
-                        viewModel.state.value.submissionId?.let { stack = stack.dropLast(1) + "submission:$it" }
+                        viewModel.state.value.submissionId?.let {
+                            holder.removeState("new")
+                            stack = stack.dropLast(1) + "submission:$it"
+                        }
                     }, onCancel = ::back, onDirty = { dirty = it })
-                route.startsWith("submission:") -> SubmissionPage(state, viewModel::refreshSubmission, { push("new") }, { push("card:$it") }, { destructive = "submission" })
+                route.startsWith("submission:") -> SubmissionPage(state, viewModel::refreshSubmission, ::startAnalysis, { push("card:$it") }, { destructive = "submission" })
                 route.startsWith("card:") -> {
                     val card = state.cards.singleOrNull { it.id == route.substringAfter(':') }
                     if (card == null) WorkspaceList { item { EmptyPanel("行动暂不可用", "请返回分析记录重新加载。") } }
@@ -154,6 +159,9 @@ fun WorkspaceRoute(
             }
         }
     }
+    LaunchedEffect(state.submissionId, state.isDataOperationPending) {
+        if (route.startsWith("submission:") && state.submissionId == null && state.dataMessage == "本次提交及其派生数据已删除") stack = listOf("main")
+    }
     if (discardAction != null) AlertDialog(onDismissRequest = { discardAction = null }, title = { Text("放弃未保存的内容？") },
         text = { Text("离开后，本次尚未保存的修改不会提交。") },
         confirmButton = { TextButton(onClick = {
@@ -175,7 +183,7 @@ fun WorkspaceRoute(
                 when (operation) {
                     "account" -> viewModel.deleteAccount()
                     "clear" -> viewModel.clearAllMemories()
-                    "submission" -> { viewModel.deleteCurrentSubmission(); stack = listOf("main") }
+                    "submission" -> viewModel.deleteCurrentSubmission()
                     "signout" -> onSignOut()
                     else -> { viewModel.deleteMemory(operation.substringAfter(':')); dirty = false; stack = stack.dropLast(1) }
                 }
