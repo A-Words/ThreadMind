@@ -233,7 +233,14 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
         };
     const result = await actions.recordExecution(request.accountId, request.params.id, input.receiptId, execution);
     if (!result) return reply.code(404).send({ error: "not_found" });
-    await insightService.ensureForReceipt(result.card, result.receipt);
+    try {
+      await insightService.ensureForReceipt(result.card, result.receipt);
+    } catch {
+      return reply.code(503).send({
+        error: "insight_generation_pending", receiptRecorded: true, receipt: result.receipt,
+        message: "Receipt saved. Retry synchronization with the same receiptId; do not execute the device action again.",
+      });
+    }
     return reply.code(201).send(result.receipt);
   });
   app.get("/v1/insights", async (request) => {

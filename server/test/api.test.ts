@@ -6,6 +6,7 @@ import { InMemoryAuthAdmin, type AuthAdmin } from "../src/account/auth-admin.js"
 import { InMemorySensitiveSessionVerifier } from "../src/account/sensitive-session-verifier.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { InMemoryTemporaryImageStorage } from "../src/adapters/temporary-image-storage.js";
+import { EvidenceBackedInsightGenerator } from "../src/insight/insight-generator.js";
 
 describe("Authentication API", () => {
   it("rejects missing bearer credentials without exposing verifier details", async () => {
@@ -23,6 +24,46 @@ describe("Authentication API", () => {
 });
 
 describe("Action Card API", () => {
+  it("keeps a successful receipt when synthesis fails and retries only insight generation", async () => {
+    const store = new InMemoryStore();
+    let calls = 0;
+    const baseline = new EvidenceBackedInsightGenerator();
+    const app = buildApp(store, { allowInsecureAccountHeader: true, insightGenerator: {
+      generate: async (input) => {
+        if (++calls === 1) throw new Error("upstream private error");
+        return baseline.generate(input);
+      },
+    } });
+    try {
+      const cardId = randomUUID();
+      const submissionId = randomUUID();
+      const headers = { "x-account-id": "a1" };
+      await app.inject({ method: "POST", url: "/v1/action-cards", headers, payload: {
+        cardId, submissionId, type: "create_contact", fields: { displayName: "Chen", contactMethod: "chen@example.com" },
+        targetAccountId: "local", evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 1 }],
+      } });
+      await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/confirm`, headers, payload: { expectedVersion: 1 } });
+      const request = { method: "POST" as const, url: `/v1/action-cards/${cardId}/receipts`, headers,
+        payload: { receiptId: randomUUID(), status: "succeeded", targetRecordId: "contact-42" } };
+      const pending = await app.inject(request);
+      assert.equal(pending.statusCode, 503);
+      assert.equal(pending.json().receiptRecorded, true);
+      assert.equal(pending.json().error, "insight_generation_pending");
+      assert.equal(pending.json().receipt.status, "succeeded");
+      assert.equal(pending.body.includes("upstream private error"), false);
+      assert.equal(store.cards.get(cardId)!.status, "succeeded");
+      assert.equal(store.insights.size, 0);
+      const retry = await app.inject(request);
+      assert.equal(retry.statusCode, 201);
+      assert.deepEqual(retry.json(), pending.json().receipt);
+      await app.inject(request);
+      assert.equal(calls, 2);
+      assert.equal(store.receipts.length, 1);
+      assert.equal(store.insights.size, 1);
+      assert.equal(store.memories.size, 1);
+    } finally { await app.close(); }
+  });
+
   it("isolates cards by account and executes only after confirmation", async () => {
     const app = buildApp(undefined, { allowInsecureAccountHeader: true });
     const cardId = randomUUID();

@@ -8,10 +8,12 @@ import { KyselyInsightRepository } from "../adapters/kysely-insight-repository.t
 import { KyselySubmissionRepository } from "../adapters/kysely-submission-repository.ts";
 import { createTemporaryImageStorage } from "../adapters/supabase-temporary-image-storage.ts";
 import { createDatabase } from "../database/database.ts";
+import { createInsightGenerator } from "../insight/openai-responses-insight-model.ts";
 
 const port = Number(process.env.PORT ?? 3000);
 const database = createDatabase(process.env);
 const app = buildApp(undefined, {
+  insightGenerator: createInsightGenerator(process.env),
   authAdmin: createAuthAdmin(process.env),
   sensitiveSessionVerifier: new KyselySensitiveSessionVerifier(database),
   actionRepository: new KyselyActionRepository(database),

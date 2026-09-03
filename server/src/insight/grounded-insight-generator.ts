@@ -54,6 +54,7 @@ export class GroundedInsightGenerator implements InsightGenerator {
       if (item.epistemicStatus === "fact" && (premises.some((p) => p.epistemicStatus !== "fact") || item.kind === "next_step" || item.suggestedAction)) {
         throw new Error("insight_unsupported_fact");
       }
+      if (premises.every((premise) => premise.kind === "receipt")) throw new Error("insight_receipt_only");
       if (item.confidence > Math.min(...premises.map((p) => p.confidence))) throw new Error("insight_overconfident");
       if (item.kind === "next_step" && !item.suggestedAction) throw new Error("insight_next_step_required");
       const evidence = premises.flatMap((p) => p.evidence);

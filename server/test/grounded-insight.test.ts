@@ -35,6 +35,7 @@ it("rejects fabricated citations, promoted inferences, excessive confidence, and
     { ...item([key]), kind: "relationship_context", epistemicStatus: "fact", confidence: 0.5, suggestedAction: null },
     { ...item([key]), confidence: 0.9 },
     { ...item(["e1"]), epistemicStatus: "fact" },
+    item(["e1"]),
     { ...item([key]), evidence: [{ sourceId: "fake", excerpt: "invented", confidence: 1 }] },
   ]) {
     await assert.rejects(new GroundedInsightGenerator({ model: "test", promptVersion: "v1", synthesize: async () => ({ items: [bad] }) }).generate(input));
