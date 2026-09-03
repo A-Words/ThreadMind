@@ -658,7 +658,7 @@ class MainViewModel @Inject constructor(
         when (result) {
             is ProviderResult.Succeeded -> recordOutcome(
                 cardId,
-                ActionReceiptRequest(UUID.randomUUID().toString(), "succeeded", targetRecordId = result.targetRecordId),
+                ActionReceiptRequest(UUID.randomUUID().toString(), "succeeded", targetRecordId = result.targetRecordId, contactContext = result.contactContext),
                 ActionStatus.SUCCEEDED,
                 "已写入系统，记录 ${result.targetRecordId}",
             )

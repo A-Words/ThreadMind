@@ -190,6 +190,7 @@ data class ActionCardResponse(
     val targetRecordId: String? = null,
     val errorCode: String? = null,
     val errorMessage: String? = null,
+    val contactContext: app.threadmind.domain.ContactContextSnapshot? = null,
 )
 
 fun ActionCardResponse.toDomain(): ActionCard = ActionCard(

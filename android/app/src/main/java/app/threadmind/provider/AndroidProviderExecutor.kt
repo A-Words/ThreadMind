@@ -13,10 +13,17 @@ import app.threadmind.domain.ActionType
 import app.threadmind.domain.ConfirmedActionSnapshot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import app.threadmind.domain.ContactContextQuery
+import app.threadmind.domain.ContactContextSnapshot
+import app.threadmind.domain.ContactSnapshotRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.Instant
 import javax.inject.Inject
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -25,15 +32,17 @@ import kotlinx.serialization.json.Json
 class AndroidProviderExecutor @Inject constructor(
     @ApplicationContext context: Context,
 ) : ProviderExecutor, ProviderInspector {
+    private val context = context.applicationContext
     private val resolver: ContentResolver = context.contentResolver
 
     override suspend fun execute(snapshot: ConfirmedActionSnapshot): ProviderResult = withContext(Dispatchers.IO) {
         runCatching {
-            when (snapshot.type) {
+            val result = when (snapshot.type) {
                 ActionType.CREATE_MEETING -> createMeeting(snapshot)
                 ActionType.CREATE_CONTACT -> createContact(snapshot)
                 ActionType.UPDATE_CONTACT -> updateContact(snapshot)
             }
+            if (result is ProviderResult.Succeeded) result.copy(contactContext = collectContactContext(snapshot, result.targetRecordId)) else result
         }.getOrElse { ProviderResult.Failed("provider_error", it.message ?: "Android Provider failed") }
     }
 
@@ -376,6 +385,46 @@ class AndroidProviderExecutor @Inject constructor(
         return matches
     }
 
+    private fun collectContactContext(snapshot: ConfirmedActionSnapshot, targetRecordId: String): ContactContextSnapshot {
+        val capturedAt = Instant.now().toString()
+        val queries = when (snapshot.type) {
+            ActionType.CREATE_CONTACT, ActionType.UPDATE_CONTACT -> listOf(ContactContextQuery("target_record_id", targetRecordId))
+            ActionType.CREATE_MEETING -> meetingAttendees(snapshot.fields["attendees"])
+                .distinctBy(String::lowercase).take(MAX_CONTACT_CONTEXT_RECORDS).map { ContactContextQuery("email", it) }
+        }
+        if (queries.isEmpty()) return ContactContextSnapshot(capturedAt = capturedAt, permissionStatus = "not_required")
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return ContactContextSnapshot(capturedAt = capturedAt, permissionStatus = "denied", queries = queries)
+        }
+        return runCatching {
+            val matches = when (snapshot.type) {
+                ActionType.CREATE_CONTACT, ActionType.UPDATE_CONTACT -> listOf(targetRecordId to "provider_record_id")
+                ActionType.CREATE_MEETING -> queries.flatMap { query -> exactEmailContactIds(query.value).map { it to "exact_email" } }
+            }.distinctBy { it.first }.take(MAX_CONTACT_CONTEXT_RECORDS)
+            val ambiguous = snapshot.type == ActionType.CREATE_MEETING && matches.size > 1
+            ContactContextSnapshot(capturedAt = capturedAt, permissionStatus = "granted", queries = queries,
+                records = matches.mapNotNull { (id, basis) -> loadContactSnapshot(id, basis,
+                    if (basis == "provider_record_id") "confirmed_target" else if (ambiguous) "ambiguous" else "candidate") })
+        }.getOrElse { ContactContextSnapshot(capturedAt = capturedAt, permissionStatus = "unavailable", queries = queries) }
+    }
+
+    private fun exactEmailContactIds(email: String): List<String> {
+        val ids = mutableListOf<String>()
+        resolver.query(ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+            arrayOf(ContactsContract.CommonDataKinds.Email.CONTACT_ID),
+            "${ContactsContract.CommonDataKinds.Email.ADDRESS} = ? COLLATE NOCASE", arrayOf(email.trim()), null,
+        )?.use { cursor -> while (cursor.moveToNext()) ids += cursor.getLong(0).toString() }
+        return ids.distinct()
+    }
+
+    private fun loadContactSnapshot(contactId: String, basis: String, identity: String): ContactSnapshotRecord? {
+        val name = resolver.query(ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId.toLong()),
+            arrayOf(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY), null, null, null,
+        )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0)?.trim()?.takeIf(String::isNotEmpty) else null }
+        val fields = rawContacts(contactId).flatMap { loadFieldRows(it.id) }
+        return buildContactSnapshotRecord(contactId, name, fields, basis, identity)
+    }
+
     private fun loadCandidate(
         contactId: String,
         preferredAccountName: String?,
@@ -546,6 +595,7 @@ class AndroidProviderExecutor @Inject constructor(
             ?: card.targetAccountId?.takeUnless { it == "local" }
 
     private companion object {
+        const val MAX_CONTACT_CONTEXT_RECORDS = 10
         const val ACTION_MARKER_MIME_TYPE = "vnd.android.cursor.item/vnd.app.threadmind.action"
         val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
         val json = Json { ignoreUnknownKeys = false; explicitNulls = false }

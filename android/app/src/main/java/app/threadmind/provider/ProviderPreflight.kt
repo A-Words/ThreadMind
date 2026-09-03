@@ -2,6 +2,7 @@ package app.threadmind.provider
 
 import app.threadmind.domain.ActionCard
 import kotlinx.serialization.Serializable
+import app.threadmind.domain.ContactSnapshotRecord
 
 @Serializable
 data class ContactFieldChange(
@@ -63,6 +64,23 @@ private fun desiredContactValues(fields: Map<String, String>): Map<String, Strin
     }
     (fields["note"] ?: fields["notes"])?.trim()?.takeIf(String::isNotEmpty)?.let { put("note", it) }
 }
+
+internal fun buildContactSnapshotRecord(
+    contactId: String,
+    displayName: String?,
+    fields: List<ContactFieldSnapshot>,
+    matchBasis: String,
+    identityStatus: String,
+): ContactSnapshotRecord = ContactSnapshotRecord(
+    providerContactId = contactId,
+    displayName = displayName,
+    emailAddresses = fields.filter { it.field == "email" }.map(ContactFieldSnapshot::value).distinct().take(3),
+    phoneNumbers = fields.filter { it.field == "phone" }.map(ContactFieldSnapshot::value).distinct().take(3),
+    organization = fields.firstOrNull { it.field == "company" }?.value,
+    jobTitle = fields.firstOrNull { it.field == "jobTitle" }?.value,
+    matchBasis = matchBasis,
+    identityStatus = identityStatus,
+)
 
 sealed interface ProviderPreflightResult {
     val cardId: String
