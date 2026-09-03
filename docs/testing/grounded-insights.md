@@ -4,7 +4,7 @@
 
 ## 本地自动化
 
-`npm test --workspace=@threadmind/server`：61 项测试通过（默认命令不连接 PostgreSQL）。
+`npm test --workspace=@threadmind/server`：62 项测试通过（默认命令不连接 PostgreSQL）。
 
 - 定向召回在限额前筛选；超过 100 条无关记忆不能遮蔽旧相关记录。
 - 当前 Extraction 和多人引用进入生成输入；修订后的版本生效，删除/其他账户不进入召回。
@@ -47,7 +47,7 @@
 - 权限拒绝且只有“之后再联系”时，建议核实出席意愿与邮箱归属，不声称对方已接受安排。
 - Provider 执行失败时不调用洞察生成器。
 
-门禁还拒绝旧通用模板、缺少具体 `next_step`、无依据的性别/称谓/关系推断、把他人请求写成用户承诺，以及凭相对时间生成精确 `suggestedAt`。本轮真实模型曾触发“请求被写成承诺”和“综合结论被标为事实”，修正提示后重跑通过。模型输出有随机性；该命令是付费语义回归，不能由 JSON Schema 合法或模型配置存在代替。
+门禁还拒绝旧通用模板、缺少具体 `next_step`、无依据的性别/称谓/关系推断、把他人请求写成用户承诺，以及凭相对时间生成精确 `suggestedAt`。本轮真实模型曾触发“请求被写成承诺”“综合结论被标为事实”和无依据性别代词；除提示约束外，生成器会依据每条洞察实际引用的 premises 确定性地中和无依据的性别、称谓及社会/业务关系措辞。对应回归加入后，真实模型 7 个案例重跑通过。模型输出有随机性；该命令是付费语义回归，不能由 JSON Schema 合法或模型配置存在代替。
 
 ## 本地真实 Agent 链路
 
@@ -58,9 +58,10 @@
 | 层级 | 本次状态 | 证据边界 |
 | --- | --- | --- |
 | 代码完成 | 通过 | Android 快照、回执/API、Memory 上下文、模型提示和 E2E 驱动均已提交 |
-| 替身测试 | 通过 | 61 项服务端测试；本地仓储和临时图片存储验证幂等、边界与证据规则 |
+| 替身测试 | 通过 | 62 项服务端测试；本地仓储和临时图片存储验证幂等、边界与证据规则 |
 | 真实运行 | 通过（本地功能链路） | Android 17 Contacts Provider、HTTP 图片上传、真实视觉模型、真实洞察模型均实际运行 |
-| 生产基础设施 | 未验收 | E2E 服务使用内存仓储、内存队列、内存图片存储和测试账户头，未覆盖 Supabase Auth、Storage、PostgreSQL/RLS 或进程间 Worker |
+| Hosted PostgreSQL | 通过（联系人回执切片） | `contact_context` 迁移已应用；Memory 与 Action Repository 强制 RLS 集成共 2 项通过 |
+| 其余生产基础设施 | 未验收 | E2E 服务使用内存队列、内存图片存储和测试账户头，未覆盖 Supabase Auth、Storage 或进程间 Worker |
 
 ## PostgreSQL
 
@@ -72,4 +73,6 @@ SQL 表达式验证不能替代 Node → Kysely → 强制 RLS 的完整集成�
 
 API 显式设置 `THREADMIND_INSIGHT_MODEL` 后启用模型推理，同时需要 `OPENAI_API_KEY`，可沿用 `OPENAI_BASE_URL`。未设置时仍为 `rules:evidence-v1` 基线；配置错误或模型失败不会静默降级为规则成功。
 
-联系人回执迁移已在仓库中，但本轮未应用到托管数据库，因此 PostgreSQL/RLS 集成仍未验收。仍缺独立的洞察后台作业、跨截图可靠身份关联、更大且有人审标的质量数据集。当前“请求/承诺”和相对时间语义主要由提示与合成门禁约束，尚无通用语义校验器。
+联系人回执迁移 `20260903194716_add_receipt_contact_context` 已应用到 Hosted ThreadMind 数据库；列、JSONB 形状约束和迁移记录已查询确认。`npm run test:integration --workspace=@threadmind/server` 中 Memory 与 Action Repository 两项均通过。迁移后安全 Advisor 没有报告本次表变更引入的问题；现有“泄露密码保护未开启”警告与该迁移无关。
+
+仍缺独立的洞察后台作业、跨截图可靠身份关联、更大且有人审标的质量数据集。当前“请求/承诺”和相对时间语义仍主要由提示与合成门禁约束，尚无通用语义校验器。
