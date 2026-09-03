@@ -38,17 +38,17 @@ export const cardVersionInput = z.object({
 
 export const executionInput = z.discriminatedUnion("status", [
   z.object({ receiptId: z.uuid(), status: z.literal("succeeded"), targetRecordId: z.string().trim().min(1), contactContext: z.object({
-    source: z.literal("android_contacts_provider"),
+    source: z.literal("android_contacts_provider").default("android_contacts_provider"),
     capturedAt: z.iso.datetime({ offset: true }),
     permissionStatus: z.enum(["granted", "denied", "not_required", "unavailable"]),
-    queries: z.array(z.object({ kind: z.enum(["target_record_id", "email", "phone"]), value: z.string().trim().min(1).max(320) }).strict()).max(10),
+    queries: z.array(z.object({ kind: z.enum(["target_record_id", "email", "phone"]), value: z.string().trim().min(1).max(320) }).strict()).max(10).default([]),
     records: z.array(z.object({
       providerContactId: z.string().trim().min(1).max(100), displayName: z.string().trim().min(1).max(300).optional(),
-      emailAddresses: z.array(z.string().trim().min(1).max(320)).max(3), phoneNumbers: z.array(z.string().trim().min(1).max(100)).max(3),
+      emailAddresses: z.array(z.string().trim().min(1).max(320)).max(3).default([]), phoneNumbers: z.array(z.string().trim().min(1).max(100)).max(3).default([]),
       organization: z.string().trim().min(1).max(300).optional(), jobTitle: z.string().trim().min(1).max(300).optional(),
       matchBasis: z.enum(["provider_record_id", "exact_email", "exact_phone", "display_name_only"]),
       identityStatus: z.enum(["confirmed_target", "candidate", "ambiguous"]),
-    }).strict()).max(10),
+    }).strict()).max(10).default([]),
   }).strict().superRefine((snapshot, context) => {
     if (snapshot.permissionStatus !== "granted" && snapshot.records.length) context.addIssue({ code: "custom", message: "Contact records require granted permission" });
     snapshot.records.forEach((record, index) => {

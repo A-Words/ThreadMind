@@ -33,23 +33,26 @@ describe("Action Card API", () => {
         fields: { displayName: "Chen", contactMethod: "chen@example.com" }, targetAccountId: "local",
         evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 1 }] } });
       await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/confirm`, headers, payload: { expectedVersion: 1 } });
-      const snapshot = { source: "android_contacts_provider", capturedAt: "2026-09-04T10:00:00Z", permissionStatus: "granted",
-        queries: [{ kind: "target_record_id", value: "42" }], records: [{ providerContactId: "42", displayName: "Chen",
-          emailAddresses: ["chen@example.com"], phoneNumbers: [], matchBasis: "provider_record_id", identityStatus: "confirmed_target" }] };
+      // Kotlin serialization omits default source/empty collections; the API restores the bounded canonical shape.
+      const snapshot = { capturedAt: "2026-09-04T10:00:00Z", permissionStatus: "granted",
+        records: [{ providerContactId: "42", displayName: "Chen", emailAddresses: ["chen@example.com"],
+          matchBasis: "provider_record_id", identityStatus: "confirmed_target" }] };
+      const normalizedSnapshot = { ...snapshot, source: "android_contacts_provider", queries: [],
+        records: [{ ...snapshot.records[0], phoneNumbers: [] }] };
       const receiptId = randomUUID();
       const first = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
         payload: { receiptId, status: "succeeded", targetRecordId: "42", contactContext: snapshot } });
       assert.equal(first.statusCode, 201);
-      assert.deepEqual(store.receipts[0]!.contactContext, snapshot);
+      assert.deepEqual(store.receipts[0]!.contactContext, normalizedSnapshot);
       const replay = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
-        payload: { receiptId, status: "succeeded", targetRecordId: "42", contactContext: { ...snapshot, records: [] } } });
-      assert.deepEqual(replay.json().contactContext, snapshot);
+        payload: { receiptId, status: "succeeded", targetRecordId: "42", contactContext: { ...normalizedSnapshot, records: [] } } });
+      assert.deepEqual(replay.json().contactContext, normalizedSnapshot);
       const invalid = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
-        payload: { receiptId: randomUUID(), status: "succeeded", targetRecordId: "42", contactContext: { ...snapshot,
-          records: [{ ...snapshot.records[0], matchBasis: "display_name_only", identityStatus: "confirmed_target" }] } } });
+        payload: { receiptId: randomUUID(), status: "succeeded", targetRecordId: "42", contactContext: { ...normalizedSnapshot,
+          records: [{ ...normalizedSnapshot.records[0], matchBasis: "display_name_only", identityStatus: "confirmed_target" }] } } });
       assert.equal(invalid.statusCode, 400);
       const failedWithSnapshot = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
-        payload: { receiptId: randomUUID(), status: "failed", errorCode: "provider_error", contactContext: snapshot } });
+        payload: { receiptId: randomUUID(), status: "failed", errorCode: "provider_error", contactContext: normalizedSnapshot } });
       assert.equal(failedWithSnapshot.statusCode, 400);
     } finally { await app.close(); }
   });
