@@ -2,7 +2,7 @@ import { z } from "zod";
 import { GroundedInsightGenerator, insightSynthesisSchema, type InsightSynthesisInput, type InsightSynthesisModel } from "./grounded-insight-generator.ts";
 import { EvidenceBackedInsightGenerator, type InsightGenerator } from "./insight-generator.ts";
 
-const PROMPT_VERSION = "threadmind-insight-v1";
+const PROMPT_VERSION = "threadmind-insight-v2";
 const responseSchema = z.object({
   status: z.string().optional(), error: z.unknown().optional(), incomplete_details: z.unknown().optional(),
   output: z.array(z.object({

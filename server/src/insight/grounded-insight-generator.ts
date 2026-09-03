@@ -58,17 +58,43 @@ export class GroundedInsightGenerator implements InsightGenerator {
       if (premises.every((premise) => premise.kind === "receipt")) throw new Error("insight_receipt_only");
       if (item.confidence > Math.min(...premises.map((p) => p.confidence))) throw new Error("insight_overconfident");
       if (item.kind === "next_step" && !item.suggestedAction) throw new Error("insight_next_step_required");
+      const safeText = normalizeUnsupportedIdentityClaims(item, premises);
       const evidence = premises.flatMap((p) => p.evidence);
       return {
-        kind: item.kind, title: item.title, explanation: item.explanation,
+        kind: item.kind, title: safeText.title, explanation: safeText.explanation,
         epistemicStatus: item.epistemicStatus, confidence: item.confidence,
         evidenceRefs: [...new Set(evidence.map((e) => e.sourceId))], evidence,
-        ...(item.suggestedAction ? { suggestedAction: item.suggestedAction } : {}),
+        ...(safeText.suggestedAction ? { suggestedAction: safeText.suggestedAction } : {}),
         ...(item.suggestedAt ? { suggestedAt: item.suggestedAt } : {}),
       };
     });
     return { items, modelTrace: { model: this.model.model, promptVersion: this.model.promptVersion } };
   }
+}
+
+const genderLanguage = /她|(?<!其)他(?!人)|先生|女士|夫人|丈夫|妻子|\b(?:she|he|her|hers|his|mr|mrs|ms)\b/iu;
+const relationshipLanguage = /同事|朋友|家人|亲属|伴侣|客户|供应商|\b(?:colleague|friend|family|relative|partner|customer|client|supplier|vendor)\b/iu;
+
+function normalizeUnsupportedIdentityClaims(
+  item: z.infer<typeof insightSynthesisSchema>["items"][number],
+  premises: InsightPremise[],
+): { title: string; explanation: string; suggestedAction?: string } {
+  const evidenceText = premises.flatMap((premise) => [premise.assertion, ...premise.evidence.map((evidence) => evidence.excerpt)]).join("\n");
+  const normalize = (value: string) => {
+    let safe = value;
+    if (!genderLanguage.test(evidenceText)) {
+      safe = safe.replace(/她/g, "对方").replace(/(?<!其)他(?!人)/g, "对方")
+        .replace(/先生|女士/g, "").replace(/夫人|丈夫|妻子/g, "联系人")
+        .replace(/\b(?:she|he|her|hers|his)\b/giu, "the person").replace(/\b(?:mr|mrs|ms)\.?\b/giu, "");
+    }
+    if (!relationshipLanguage.test(evidenceText)) {
+      safe = safe.replace(/同事|朋友|家人|亲属|伴侣|客户|供应商/g, "联系人")
+        .replace(/\b(?:colleague|friend|family|relative|partner|customer|client|supplier|vendor)\b/giu, "contact");
+    }
+    return safe.replace(/ {2,}/g, " ").trim() || "联系人身份待核对";
+  };
+  const normalized = { title: normalize(item.title), explanation: normalize(item.explanation) };
+  return item.suggestedAction ? { ...normalized, suggestedAction: normalize(item.suggestedAction) } : normalized;
 }
 
 export function assembleInsightContext(input: InsightGenerationInput): InsightSynthesisInput {

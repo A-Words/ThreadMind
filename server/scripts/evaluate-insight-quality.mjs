@@ -20,6 +20,7 @@ async function evaluate(name, input, verify) {
   assert.ok(result.items.every((item) => item.explanation.length > 12), `${name}: generic short explanation`);
   assert.ok(!JSON.stringify(result).includes("复核本次更新和相关背景"), `${name}: legacy generic template`);
   assert.doesNotMatch(JSON.stringify(result), /她|女士|先生|夫人|丈夫|妻子/, `${name}: inferred gender, honorific, or relationship`);
+  assert.doesNotMatch(JSON.stringify(result), /同事|朋友|家人|亲属|伴侣|客户|供应商/, `${name}: inferred social or business relationship`);
   assert.ok(result.items.every((item) => item.suggestedAt === undefined), `${name}: invented an exact action time`);
   if (name !== "prior_commitment") assert.doesNotMatch(JSON.stringify(result), /明确承诺|承诺事项|交付承诺|承诺要求|你承诺|用户承诺/, `${name}: converted a request into a commitment`);
   console.log(JSON.stringify({ name, items: result.items.map(({ kind, title, suggestedAction, suggestedAt, evidenceRefs }) => ({ kind, title, suggestedAction, suggestedAt, evidenceRefs })) }));

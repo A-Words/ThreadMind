@@ -26,7 +26,7 @@ it("sends non-stored structured synthesis and returns raw output for evidence va
     },
   });
   assert.deepEqual(await model.synthesize(input), { items: [] });
-  assert.equal(model.promptVersion, "threadmind-insight-v1");
+  assert.equal(model.promptVersion, "threadmind-insight-v2");
 });
 
 it("rejects provider errors, refusal, incomplete output, malformed JSON and oversized context without leaking payloads", async () => {

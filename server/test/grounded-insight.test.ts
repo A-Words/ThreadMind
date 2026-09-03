@@ -80,6 +80,17 @@ it("exposes bounded contact fields as evidence while preserving same-name ambigu
   assert.ok(result.items[0]!.evidenceRefs.some((source) => source.startsWith("contact:receipt-1:")));
 });
 
+it("neutralizes gender, honorific and relationship claims absent from cited evidence", async () => {
+  const input = fixture();
+  const key = assembleInsightContext(input).premises.find((premise) => premise.kind === "current_context")!.key;
+  const generated = { ...item([key]), title: "给林女士发送资料", explanation: "她是我们的客户，需要及时回复。",
+    suggestedAction: "给她发送邮件" };
+  const result = await new GroundedInsightGenerator({ model: "test", promptVersion: "v2", synthesize: async () => ({ items: [generated] }) }).generate(input);
+  assert.equal(result.items[0]!.title, "给林发送资料");
+  assert.equal(result.items[0]!.explanation, "对方是我们的联系人，需要及时回复。");
+  assert.equal(result.items[0]!.suggestedAction, "给对方发送邮件");
+});
+
 function item(evidenceKeys: string[]) {
   return {
     kind: "next_step", title: "会前邮件发送方案", explanation: "对方偏好邮件，并约定会前看方案，可先发方案供其准备。",
