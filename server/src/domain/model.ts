@@ -124,6 +124,26 @@ export interface ActionReceipt {
   errorMessage?: string;
   startedAt: string;
   completedAt: string;
+  contactContext?: ContactContextSnapshot;
+}
+
+export interface ContactContextSnapshot {
+  source: "android_contacts_provider";
+  capturedAt: string;
+  permissionStatus: "granted" | "denied" | "not_required" | "unavailable";
+  queries: Array<{ kind: "target_record_id" | "email" | "phone"; value: string }>;
+  records: ContactSnapshotRecord[];
+}
+
+export interface ContactSnapshotRecord {
+  providerContactId: string;
+  displayName?: string;
+  emailAddresses: string[];
+  phoneNumbers: string[];
+  organization?: string;
+  jobTitle?: string;
+  matchBasis: "provider_record_id" | "exact_email" | "exact_phone" | "display_name_only";
+  identityStatus: "confirmed_target" | "candidate" | "ambiguous";
 }
 
 export interface MemoryRecord {

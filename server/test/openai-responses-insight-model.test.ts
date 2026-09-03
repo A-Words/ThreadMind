@@ -6,7 +6,9 @@ import { GroundedInsightGenerator, type InsightSynthesisInput } from "../src/ins
 
 const input: InsightSynthesisInput = {
   action: { type: "create_contact", fields: { displayName: "Synthetic contact" } },
-  currentContext: null, premises: [], contactContext: "device_contacts_not_available",
+  currentContext: null, premises: [], contactContext: {
+    source: "android_contacts_provider", capturedAt: "2026-09-04T00:00:00Z", permissionStatus: "unavailable", queries: [], records: [],
+  },
 };
 
 it("sends non-stored structured synthesis and returns raw output for evidence validation", async () => {

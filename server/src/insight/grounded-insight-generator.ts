@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EpistemicStatus, EvidenceRef } from "../domain/model.ts";
+import type { ContactContextSnapshot, EpistemicStatus, EvidenceRef } from "../domain/model.ts";
 import type { InsightGenerationInput, InsightGenerator } from "./insight-generator.ts";
 
 export const insightSynthesisSchema = z.strictObject({
@@ -17,7 +17,7 @@ export const insightSynthesisSchema = z.strictObject({
 
 export interface InsightPremise {
   key: string;
-  kind: "receipt" | "confirmed_action" | "current_context" | "memory";
+  kind: "receipt" | "confirmed_action" | "current_context" | "contact" | "memory";
   assertion: string;
   epistemicStatus: EpistemicStatus;
   confidence: number;
@@ -28,7 +28,7 @@ export interface InsightSynthesisInput {
   action: { type: InsightGenerationInput["card"]["type"]; fields: Record<string, unknown> };
   currentContext: { messages: NonNullable<InsightGenerationInput["extraction"]>["messages"]; warnings: string[] } | null;
   premises: InsightPremise[];
-  contactContext: "device_contacts_not_available";
+  contactContext: Omit<ContactContextSnapshot, "records"> & { records: Array<Omit<ContactContextSnapshot["records"][number], "providerContactId"> & { premiseKey: string }> };
 }
 
 export interface InsightSynthesisModel {
@@ -92,6 +92,22 @@ export function assembleInsightContext(input: InsightGenerationInput): InsightSy
   for (const span of extraction?.evidenceSpans ?? []) {
     add("current_context", span.excerpt, "fact", span.confidence, [{ sourceId: `${card.submissionId}:${span.id}`, messageId: span.messageId, excerpt: span.excerpt, confidence: span.confidence }]);
   }
+  const contactRecords: InsightSynthesisInput["contactContext"]["records"] = [];
+  for (const [index, record] of (receipt.contactContext?.records ?? []).entries()) {
+    const assertion = [record.displayName && `name=${record.displayName}`, record.emailAddresses.length && `emails=${record.emailAddresses.join(",")}`,
+      record.phoneNumbers.length && `phones=${record.phoneNumbers.join(",")}`, record.organization && `organization=${record.organization}`,
+      record.jobTitle && `jobTitle=${record.jobTitle}`, `match=${record.matchBasis}`, `identity=${record.identityStatus}`].filter(Boolean).join("; ");
+    const before = premises.length;
+    add("contact", assertion, "fact", contactConfidence(record.identityStatus), [{
+      sourceId: `contact:${receipt.id}:${index}`, excerpt: `Android 联系人快照（${receipt.contactContext!.capturedAt}）：${assertion}`,
+      confidence: contactConfidence(record.identityStatus),
+    }]);
+    if (premises.length > before) contactRecords.push({
+      ...(record.displayName ? { displayName: record.displayName } : {}), emailAddresses: [...record.emailAddresses], phoneNumbers: [...record.phoneNumbers],
+      ...(record.organization ? { organization: record.organization } : {}), ...(record.jobTitle ? { jobTitle: record.jobTitle } : {}),
+      matchBasis: record.matchBasis, identityStatus: record.identityStatus, premiseKey: premises.at(-1)!.key,
+    });
+  }
   for (const memory of input.memories) {
     if (memory.accountId !== card.accountId || memory.status !== "active") continue;
     if (memory.sourceRefs.includes(`${card.submissionId}:receipt:${receipt.id}`)) continue;
@@ -103,6 +119,14 @@ export function assembleInsightContext(input: InsightGenerationInput): InsightSy
   return {
     action: { type: card.type, fields: structuredClone(card.confirmedSnapshot?.fields ?? card.fields) },
     currentContext: extraction ? { messages: structuredClone(extraction.messages), warnings: [...extraction.warnings] } : null,
-    premises, contactContext: "device_contacts_not_available",
+    premises,
+    contactContext: receipt.contactContext
+      ? { source: receipt.contactContext.source, capturedAt: receipt.contactContext.capturedAt, permissionStatus: receipt.contactContext.permissionStatus,
+          queries: structuredClone(receipt.contactContext.queries), records: contactRecords }
+      : { source: "android_contacts_provider", capturedAt: receipt.completedAt, permissionStatus: "unavailable", queries: [], records: [] },
   };
+}
+
+function contactConfidence(status: ContactContextSnapshot["records"][number]["identityStatus"]): number {
+  return status === "confirmed_target" ? 1 : status === "candidate" ? 0.8 : 0.5;
 }

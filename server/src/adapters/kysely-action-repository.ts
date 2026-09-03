@@ -192,6 +192,7 @@ function toActionReceiptRow(receipt: ActionReceipt): Insertable<ActionReceiptsTa
     error_message: receipt.errorMessage ?? null,
     started_at: receipt.startedAt,
     completed_at: receipt.completedAt,
+    contact_context: receipt.contactContext ? JSON.stringify(receipt.contactContext) : null,
   };
 }
 
@@ -209,5 +210,6 @@ export function toActionReceipt(row: Selectable<ActionReceiptsTable>): ActionRec
     ...(row.error_message ? { errorMessage: row.error_message } : {}),
     startedAt: new Date(row.started_at).toISOString(),
     completedAt: new Date(row.completed_at).toISOString(),
+    ...(row.contact_context ? { contactContext: row.contact_context } : {}),
   };
 }

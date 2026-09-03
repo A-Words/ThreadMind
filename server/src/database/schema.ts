@@ -43,6 +43,7 @@ export interface ActionReceiptsTable {
   error_message: string | null;
   started_at: Timestamp;
   completed_at: Timestamp;
+  contact_context: ColumnType<ActionReceipt["contactContext"] | null, string | null, string | null>;
 }
 
 export interface ScreenshotSubmissionsTable {

@@ -10,7 +10,7 @@ it("synthesizes multiple memories with current context and restores evidence fro
   const generator = new GroundedInsightGenerator({
     model: "test-model", promptVersion: "test-v1", synthesize: async (context) => {
       calls++;
-      assert.equal(context.contactContext, "device_contacts_not_available");
+      assert.equal(context.contactContext.permissionStatus, "unavailable");
       assert.equal(context.currentContext!.messages[0]!.text, "Please send the proposal before our meeting");
       const memories = context.premises.filter((p) => p.kind === "memory");
       assert.equal(memories.length, 2);
@@ -55,6 +55,29 @@ it("uses corrected assertion and correction evidence, excludes deleted/cross-acc
   assert.deepEqual(memories[0]!.evidence.map((e) => e.excerpt), ["Chen now prefers phone"]);
   input.extraction!.accountId = "a2";
   assert.throws(() => assembleInsightContext(input), /context_mismatch/);
+});
+
+it("exposes bounded contact fields as evidence while preserving same-name ambiguity", async () => {
+  const input = fixture();
+  input.receipt.contactContext = {
+    source: "android_contacts_provider", capturedAt: "2026-09-04T10:00:00Z", permissionStatus: "granted",
+    queries: [{ kind: "email", value: "chen@example.com" }], records: [
+      { providerContactId: "42", displayName: "Chen", emailAddresses: ["chen@example.com"], phoneNumbers: [], organization: "Acme",
+        matchBasis: "exact_email", identityStatus: "ambiguous" },
+      { providerContactId: "84", displayName: "Chen", emailAddresses: ["chen@example.com"], phoneNumbers: [], organization: "Beta",
+        matchBasis: "exact_email", identityStatus: "ambiguous" },
+    ],
+  };
+  const generator = new GroundedInsightGenerator({ model: "test", promptVersion: "v1", synthesize: async (context) => {
+    assert.equal(context.contactContext.capturedAt, "2026-09-04T10:00:00Z");
+    assert.equal(context.contactContext.records.length, 2);
+    assert.equal(JSON.stringify(context.contactContext).includes("providerContactId"), false);
+    const contacts = context.premises.filter((premise) => premise.kind === "contact");
+    assert.deepEqual(contacts.map((premise) => premise.confidence), [0.5, 0.5]);
+    return { items: [item([contacts[0]!.key, "e2"])] };
+  } });
+  const result = await generator.generate(input);
+  assert.ok(result.items[0]!.evidenceRefs.some((source) => source.startsWith("contact:receipt-1:")));
 });
 
 function item(evidenceKeys: string[]) {

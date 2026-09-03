@@ -1,7 +1,7 @@
-import type { ActionCard, ActionReceipt } from "../domain/model.ts";
+import type { ActionCard, ActionReceipt, ContactContextSnapshot } from "../domain/model.ts";
 
 export type ExecutionResult =
-  | { status: "succeeded"; targetRecordId: string }
+  | { status: "succeeded"; targetRecordId: string; contactContext?: ContactContextSnapshot }
   | { status: "failed" | "cancelled"; errorCode?: string; errorMessage?: string };
 
 export interface ActionRepository {

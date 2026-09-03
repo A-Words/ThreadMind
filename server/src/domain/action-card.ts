@@ -79,7 +79,7 @@ export function confirmCard(card: ActionCard, now = new Date()): ActionCard {
 
 export function recordExecution(
   card: ActionCard,
-  result: { status: "succeeded"; targetRecordId: string } | { status: "failed" | "cancelled"; errorCode?: string; errorMessage?: string },
+  result: { status: "succeeded"; targetRecordId: string; contactContext?: import("./model.ts").ContactContextSnapshot } | { status: "failed" | "cancelled"; errorCode?: string; errorMessage?: string },
   previousAttempts: ActionReceipt[],
   now = new Date(),
   receiptId: string = randomUUID(),
@@ -97,6 +97,7 @@ export function recordExecution(
     status: result.status,
     provider,
     ...(result.status === "succeeded" ? { targetRecordId: result.targetRecordId } : {}),
+    ...(result.status === "succeeded" && result.contactContext ? { contactContext: structuredClone(result.contactContext) } : {}),
     ...(result.status !== "succeeded" && result.errorCode ? { errorCode: result.errorCode } : {}),
     ...(result.status !== "succeeded" && result.errorMessage ? { errorMessage: result.errorMessage } : {}),
     startedAt,

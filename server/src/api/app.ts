@@ -19,7 +19,7 @@ import type { SubmissionRepository } from "../adapters/submission-repository.ts"
 import { InMemoryTemporaryImageStorage, type TemporaryImageStorage } from "../adapters/temporary-image-storage.ts";
 import { confirmCard, editCard, evaluateCard } from "../domain/action-card.ts";
 import { DomainError } from "../domain/errors.ts";
-import type { ActionCard } from "../domain/model.ts";
+import type { ActionCard, ContactContextSnapshot } from "../domain/model.ts";
 import { createMemory } from "../domain/memory.ts";
 import { prepareSubmission, sameSubmissionContent, SCREENSHOT_CONTENT_TYPES } from "../domain/submission.ts";
 import { submissionHistoryInput } from "../domain/submission-history.ts";
@@ -225,7 +225,8 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   app.post<{ Params: { id: string } }>("/v1/action-cards/:id/receipts", async (request, reply) => {
     const input = executionInput.parse(request.body);
     const execution = input.status === "succeeded"
-      ? { status: input.status, targetRecordId: input.targetRecordId } as const
+      ? { status: input.status, targetRecordId: input.targetRecordId,
+          ...(input.contactContext ? { contactContext: structuredClone(input.contactContext) as ContactContextSnapshot } : {}) } as const
       : {
           status: input.status,
           ...(input.errorCode ? { errorCode: input.errorCode } : {}),

@@ -37,8 +37,30 @@ export const cardVersionInput = z.object({
 });
 
 export const executionInput = z.discriminatedUnion("status", [
-  z.object({ receiptId: z.uuid(), status: z.literal("succeeded"), targetRecordId: z.string().trim().min(1) }),
-  z.object({ receiptId: z.uuid(), status: z.enum(["failed", "cancelled"]), errorCode: z.string().trim().min(1).max(100).optional(), errorMessage: z.string().trim().min(1).max(1000).optional() }),
+  z.object({ receiptId: z.uuid(), status: z.literal("succeeded"), targetRecordId: z.string().trim().min(1), contactContext: z.object({
+    source: z.literal("android_contacts_provider"),
+    capturedAt: z.iso.datetime({ offset: true }),
+    permissionStatus: z.enum(["granted", "denied", "not_required", "unavailable"]),
+    queries: z.array(z.object({ kind: z.enum(["target_record_id", "email", "phone"]), value: z.string().trim().min(1).max(320) }).strict()).max(10),
+    records: z.array(z.object({
+      providerContactId: z.string().trim().min(1).max(100), displayName: z.string().trim().min(1).max(300).optional(),
+      emailAddresses: z.array(z.string().trim().min(1).max(320)).max(3), phoneNumbers: z.array(z.string().trim().min(1).max(100)).max(3),
+      organization: z.string().trim().min(1).max(300).optional(), jobTitle: z.string().trim().min(1).max(300).optional(),
+      matchBasis: z.enum(["provider_record_id", "exact_email", "exact_phone", "display_name_only"]),
+      identityStatus: z.enum(["confirmed_target", "candidate", "ambiguous"]),
+    }).strict()).max(10),
+  }).strict().superRefine((snapshot, context) => {
+    if (snapshot.permissionStatus !== "granted" && snapshot.records.length) context.addIssue({ code: "custom", message: "Contact records require granted permission" });
+    snapshot.records.forEach((record, index) => {
+      if (record.matchBasis === "display_name_only" && record.identityStatus === "confirmed_target") {
+        context.addIssue({ code: "custom", path: ["records", index, "identityStatus"], message: "A display-name match cannot confirm identity" });
+      }
+      if (record.identityStatus === "confirmed_target" && record.matchBasis !== "provider_record_id") {
+        context.addIssue({ code: "custom", path: ["records", index, "identityStatus"], message: "Only the provider target can confirm identity" });
+      }
+    });
+  }).optional() }).strict(),
+  z.object({ receiptId: z.uuid(), status: z.enum(["failed", "cancelled"]), errorCode: z.string().trim().min(1).max(100).optional(), errorMessage: z.string().trim().min(1).max(1000).optional() }).strict(),
 ]);
 
 export const memoryInput = z.object({

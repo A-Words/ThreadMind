@@ -24,6 +24,36 @@ describe("Authentication API", () => {
 });
 
 describe("Action Card API", () => {
+  it("persists a bounded contact snapshot and rejects false name identity", async () => {
+    const store = new InMemoryStore();
+    const app = buildApp(store, { allowInsecureAccountHeader: true });
+    try {
+      const cardId = randomUUID(); const submissionId = randomUUID(); const headers = { "x-account-id": "a1" };
+      await app.inject({ method: "POST", url: "/v1/action-cards", headers, payload: { cardId, submissionId, type: "create_contact",
+        fields: { displayName: "Chen", contactMethod: "chen@example.com" }, targetAccountId: "local",
+        evidence: [{ sourceId: submissionId, excerpt: "chen@example.com", confidence: 1 }] } });
+      await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/confirm`, headers, payload: { expectedVersion: 1 } });
+      const snapshot = { source: "android_contacts_provider", capturedAt: "2026-09-04T10:00:00Z", permissionStatus: "granted",
+        queries: [{ kind: "target_record_id", value: "42" }], records: [{ providerContactId: "42", displayName: "Chen",
+          emailAddresses: ["chen@example.com"], phoneNumbers: [], matchBasis: "provider_record_id", identityStatus: "confirmed_target" }] };
+      const receiptId = randomUUID();
+      const first = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
+        payload: { receiptId, status: "succeeded", targetRecordId: "42", contactContext: snapshot } });
+      assert.equal(first.statusCode, 201);
+      assert.deepEqual(store.receipts[0]!.contactContext, snapshot);
+      const replay = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
+        payload: { receiptId, status: "succeeded", targetRecordId: "42", contactContext: { ...snapshot, records: [] } } });
+      assert.deepEqual(replay.json().contactContext, snapshot);
+      const invalid = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
+        payload: { receiptId: randomUUID(), status: "succeeded", targetRecordId: "42", contactContext: { ...snapshot,
+          records: [{ ...snapshot.records[0], matchBasis: "display_name_only", identityStatus: "confirmed_target" }] } } });
+      assert.equal(invalid.statusCode, 400);
+      const failedWithSnapshot = await app.inject({ method: "POST", url: `/v1/action-cards/${cardId}/receipts`, headers,
+        payload: { receiptId: randomUUID(), status: "failed", errorCode: "provider_error", contactContext: snapshot } });
+      assert.equal(failedWithSnapshot.statusCode, 400);
+    } finally { await app.close(); }
+  });
+
   it("keeps a successful receipt when synthesis fails and retries only insight generation", async () => {
     const store = new InMemoryStore();
     let calls = 0;
