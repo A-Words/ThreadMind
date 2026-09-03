@@ -19,6 +19,9 @@ async function evaluate(name, input, verify) {
   assert.ok(nextStep(result)?.suggestedAction, `${name}: concrete next step required`);
   assert.ok(result.items.every((item) => item.explanation.length > 12), `${name}: generic short explanation`);
   assert.ok(!JSON.stringify(result).includes("复核本次更新和相关背景"), `${name}: legacy generic template`);
+  assert.doesNotMatch(JSON.stringify(result), /她|女士|先生|夫人|丈夫|妻子/, `${name}: inferred gender, honorific, or relationship`);
+  assert.ok(result.items.every((item) => item.suggestedAt === undefined), `${name}: invented an exact action time`);
+  if (name !== "prior_commitment") assert.doesNotMatch(JSON.stringify(result), /明确承诺|承诺事项|交付承诺|承诺要求|你承诺|用户承诺/, `${name}: converted a request into a commitment`);
   console.log(JSON.stringify({ name, items: result.items.map(({ kind, title, suggestedAction, suggestedAt, evidenceRefs }) => ({ kind, title, suggestedAction, suggestedAt, evidenceRefs })) }));
   verify(result);
   records.push({ name, items: result.items.map(({ kind, title, explanation, suggestedAction, suggestedAt, evidenceRefs }) => ({ kind, title, explanation, suggestedAction, suggestedAt, evidenceRefs })) });
@@ -27,7 +30,7 @@ async function evaluate(name, input, verify) {
 const preference = memory("preference", "Lin 偏好通过邮件接收正式材料。", "history:preference");
 await evaluate("history_preference", fixture({ memories: [preference] }), (result) => {
   const refs = nextStep(result).evidenceRefs;
-  assert.ok(refs.includes("history:preference") && refs.some((ref) => ref.startsWith("contact:")) && refs.includes("submission-1"));
+  assert.ok(refs.includes("history:preference") && refs.some((ref) => ref.startsWith("contact:")) && refs.some((ref) => ref.startsWith("submission-1")));
   assert.match(nextStep(result).suggestedAction, /邮件|@/);
 });
 
