@@ -18,6 +18,7 @@
     "test:recall-integration": "npm run build --silent && node --env-file-if-exists=../.env --test dist/test/memory-recall.integration.js",
     "test:insight-model": "npm run build --silent && node --env-file-if-exists=../.env scripts/smoke-insight.mjs",
     "test:insight-quality": "npm run build --silent && node --env-file-if-exists=../.env scripts/evaluate-insight-quality.mjs",
+    "dev:real-e2e": "npm run build --silent && node --env-file-if-exists=../.env scripts/local-agent-e2e-server.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
