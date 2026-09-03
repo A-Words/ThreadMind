@@ -16,6 +16,7 @@
     "test:integration": "npm run build --silent && node --env-file-if-exists=../.env --test dist/test/postgres.integration.test.js",
     "test:history-integration": "npm run build --silent && node --env-file-if-exists=../.env --test dist/test/submission-history.integration.js",
     "test:recall-integration": "npm run build --silent && node --env-file-if-exists=../.env --test dist/test/memory-recall.integration.js",
+    "test:insight-model": "npm run build --silent && node --env-file-if-exists=../.env scripts/smoke-insight.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

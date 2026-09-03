@@ -36,6 +36,7 @@ it("rejects fabricated citations, promoted inferences, excessive confidence, and
     { ...item([key]), confidence: 0.9 },
     { ...item(["e1"]), epistemicStatus: "fact" },
     item(["e1"]),
+    { ...item([key]), kind: "relationship_context", suggestedAction: null },
     { ...item([key]), evidence: [{ sourceId: "fake", excerpt: "invented", confidence: 1 }] },
   ]) {
     await assert.rejects(new GroundedInsightGenerator({ model: "test", promptVersion: "v1", synthesize: async () => ({ items: [bad] }) }).generate(input));
@@ -45,7 +46,8 @@ it("rejects fabricated citations, promoted inferences, excessive confidence, and
 it("uses corrected assertion and correction evidence, excludes deleted/cross-account memory and detects foreign context", () => {
   const input = fixture();
   const [, corrected] = reviseMemory(input.memories[0]!, "Chen now prefers phone", "user:correction");
-  input.memories = [corrected, { ...input.memories[1]!, status: "deleted" }, { ...input.memories[1]!, accountId: "a2" }];
+  input.memories = [corrected, { ...input.memories[1]!, status: "deleted" }, { ...input.memories[1]!, accountId: "a2" },
+    { ...input.memories[1]!, sourceRefs: ["submission-1:receipt:receipt-1"], sourceEvidence: [{ sourceId: "submission-1:receipt:receipt-1", excerpt: "Action succeeded", confidence: 1 }] }];
   const context = assembleInsightContext(input);
   const memories = context.premises.filter((p) => p.kind === "memory");
   assert.equal(memories.length, 1);

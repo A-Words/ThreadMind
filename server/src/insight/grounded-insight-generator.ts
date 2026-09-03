@@ -44,6 +44,7 @@ export class GroundedInsightGenerator implements InsightGenerator {
     const context = assembleInsightContext(input);
     const raw = await this.model.synthesize(context);
     const output = insightSynthesisSchema.parse(raw);
+    if (!output.items.some((item) => item.kind === "next_step" && item.suggestedAction)) throw new Error("insight_next_step_required");
     const byKey = new Map(context.premises.map((premise) => [premise.key, premise]));
     const items = output.items.map((item) => {
       const premises = [...new Set(item.evidenceKeys)].map((key) => {
@@ -93,6 +94,7 @@ export function assembleInsightContext(input: InsightGenerationInput): InsightSy
   }
   for (const memory of input.memories) {
     if (memory.accountId !== card.accountId || memory.status !== "active") continue;
+    if (memory.sourceRefs.includes(`${card.submissionId}:receipt:${receipt.id}`)) continue;
     // Revisions retain old provenance for display, but only the user's correction supports the new assertion.
     const sources = memory.supersedesId ? memory.sourceEvidence.slice(-1) : memory.sourceEvidence;
     add("memory", memory.assertion, memory.epistemicStatus, memory.confidence,

@@ -7,7 +7,7 @@
 - `server/`：Node.js 24 + TypeScript + Fastify 模块化服务端。
 - Action Card：字段/evidence 非空校验、阻塞状态、编辑增版、逐版本确认、不可变确认快照、独立执行回执与账户隔离；已确认卡片由用户取消时也会生成幂等 `cancelled` 回执。
 - Memory：来源强制、事实/推断标记、用户修正版本化、可读来源摘录、关键词/联系人/类型/时间检索、删除后正文抹除与默认召回过滤。
-- Insight：正式洞察必须存在同账户成功回执，每个 item 都有依据；按稳定生成键幂等持久化并提供账户隔离的历史查询。当前默认 generator 是保守的证据规则实现，不是生产模型。
+- Insight：正式洞察必须存在同账户成功回执，每个 item 都有依据；按稳定生成键幂等持久化并提供账户隔离的历史查询。默认是明确标识的规则基线；配置 `THREADMIND_INSIGHT_MODEL` 后使用模型综合当前 Extraction 和定向召回的最多 30 条有效 Memory。展示证据由服务端按允许的 key 回填，拒绝伪造来源、推断升级事实、超出依据的置信度和仅复述回执的条目。最新设备联系人资料仍未接入。
 - Auth：生产入口通过 Supabase JWKS 验证 Bearer Token；不提供生产可用的账户头旁路。
 - PostgreSQL：Supabase 托管实例、显式 SQL migration、强制 RLS、最小权限运行角色，以及 Kysely Submission、Action、Memory、Insight 与账户导出 repositories。
 - Action API：卡片创建使用客户端稳定 UUID，编辑使用期望版本阻止重复应用，确认可安全重试，执行回执使用稳定 UUID 在提交结果不确定时返回原记录。
@@ -32,7 +32,7 @@
 
 ## 尚未接入
 
-- 脱敏/合成多模态模型评测集，以及基于评测结果选定的生产模型配置。当前 adapter、LangGraph 与严格输出契约已接通，但没有真实模型凭证与回归集的验证证据。
+- 脱敏/合成多模态模型评测集，以及基于评测结果选定的生产模型配置。2026-09-04 已运行执行后洞察的单个合成样例并做提示修正回归；这不等于截图提取质量、用户帮助度或整条 Agent 流程已验收。
 - 会议/联系人数据可能在预检和最终写入之间发生变化；联系人更新已做写入时旧值复核，目标账户在预检时验证可用，但会议和创建联系人仍需用真实 Provider 压测竞态行为。
 - 真实设备上的联系人/日历写入、权限撤销、账户删除、导出文件回读和中国大陆网络验证。
 - 新增的 Memory 来源证据、Insight 生成键与敏感 Session 检查 migrations 尚未应用到 Hosted 项目，远端集成测试会在迁移前因缺列失败；应用 migration 属于外部数据库变更，需要明确部署授权。
@@ -97,6 +97,8 @@ Supabase Hosted 项目的 Auth 配置必须满足：
 截图上传和账户硬删除还要求服务端环境配置 `SUPABASE_URL`、仅服务端可见的 `SUPABASE_SECRET_KEY`，以及可选的 `SUPABASE_STORAGE_BUCKET`。Android 仍只配置 publishable key；secret key 不得写入 `local.properties`、APK 或客户端日志。
 
 Worker 还要求仅服务端可见的 `OPENAI_API_KEY` 和 `THREADMIND_VISION_MODEL`。模型名必须来自当前部署的评测结论，仓库不提供默认生产模型。可选的 `OPENAI_BASE_URL`、`THREADMIND_MODEL_TIMEOUT_MS`、`THREADMIND_MODEL_MAX_OUTPUT_TOKENS`、Worker 轮询与退避参数均列在 `.env.example`。Responses adapter 的接口形状以 [OpenAI Responses API](https://developers.openai.com/api/reference/typescript/resources/beta/subresources/responses/methods/create) 为准；单元测试使用注入的本地 `fetch`，不会发送真实截图或调用外部模型。
+
+执行后模型洞察由 API 的 `THREADMIND_INSIGHT_MODEL` 独立启用，使用同一服务端 `OPENAI_API_KEY` / `OPENAI_BASE_URL`；未设置时保留规则基线。模型请求上限 30 秒、输入上限 200 KB，不会静默裁掉用户纠错或来源。`npm run test:insight-model --workspace=@threadmind/server` 是会调用真实模型的合成样例检查，验证范围和连接限制见 [执行后洞察验证记录](testing/grounded-insights.md)。
 
 容器可以从同一 Dockerfile 分别构建：
 
