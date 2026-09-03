@@ -47,8 +47,8 @@ export function buildApp(store = new InMemoryStore(), options: AppOptions = {}) 
   const accountExports = options.accountExportRepository ?? new InMemoryAccountExportRepository(store);
   const memories = options.memoryRepository ?? new InMemoryMemoryRepository(store);
   const insights = options.insightRepository ?? new InMemoryInsightRepository(store);
-  const insightService = new InsightService(insights, memories, options.insightGenerator ?? new EvidenceBackedInsightGenerator());
   const submissions = options.submissionRepository ?? new InMemorySubmissionRepository(store);
+  const insightService = new InsightService(insights, memories, options.insightGenerator ?? new EvidenceBackedInsightGenerator(), submissions);
   const temporaryImages = options.temporaryImageStorage ?? new InMemoryTemporaryImageStorage();
   const authAdmin = options.authAdmin ?? new InMemoryAuthAdmin((accountId) => store.deleteAccount(accountId));
   const sensitiveSessions = options.sensitiveSessionVerifier ?? new InMemorySensitiveSessionVerifier();

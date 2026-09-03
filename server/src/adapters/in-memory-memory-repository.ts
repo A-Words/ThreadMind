@@ -1,10 +1,19 @@
 import { deleteMemory, reviseMemory } from "../domain/memory.ts";
 import type { MemoryRecord } from "../domain/model.ts";
 import type { MemoryRepository, MemorySearchQuery } from "./memory-repository.ts";
+import { isRecallCandidate, MEMORY_RECALL_LIMIT, type MemoryRecallQuery } from "./memory-repository.ts";
 import type { InMemoryStore } from "./in-memory-store.ts";
 
 export class InMemoryMemoryRepository implements MemoryRepository {
   constructor(private readonly store: InMemoryStore) {}
+
+  async recallActive(accountId: string, query: MemoryRecallQuery): Promise<MemoryRecord[]> {
+    return this.store.activeMemories(accountId)
+      .filter((memory) => memory.sourceEvidence.some((evidence) => memory.sourceRefs.includes(evidence.sourceId) && evidence.excerpt.trim()))
+      .filter((memory) => isRecallCandidate(memory, query))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id))
+      .slice(0, MEMORY_RECALL_LIMIT);
+  }
 
   async listActive(accountId: string, query: MemorySearchQuery = {}): Promise<MemoryRecord[]> {
     const search = query.search?.trim().toLocaleLowerCase();
@@ -26,6 +35,11 @@ export class InMemoryMemoryRepository implements MemoryRepository {
   }
 
   async create(memory: MemoryRecord): Promise<MemoryRecord> {
+    const existing = this.store.memories.get(memory.id);
+    if (existing) {
+      if (existing.accountId !== memory.accountId) throw new Error("memory_id_conflict");
+      return structuredClone(existing);
+    }
     this.store.memories.set(memory.id, structuredClone(memory));
     return structuredClone(memory);
   }

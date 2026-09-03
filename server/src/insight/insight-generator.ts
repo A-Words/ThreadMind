@@ -1,9 +1,10 @@
-import type { ActionCard, ActionReceipt, EvidenceRef, InsightBundle, InsightItem, MemoryRecord } from "../domain/model.ts";
+import type { ActionCard, ActionReceipt, ContextExtraction, EvidenceRef, InsightBundle, InsightItem, MemoryRecord } from "../domain/model.ts";
 
 export interface InsightGenerationInput {
   card: ActionCard;
   receipt: ActionReceipt & { status: "succeeded"; targetRecordId: string };
   memories: MemoryRecord[];
+  extraction?: ContextExtraction;
 }
 
 export interface InsightGenerationOutput {

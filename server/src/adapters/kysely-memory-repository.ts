@@ -4,9 +4,32 @@ import type { MemoryRecord } from "../domain/model.ts";
 import { retryTransient, withAccount } from "../database/account-transaction.ts";
 import type { ThreadMindDatabase, MemoryRecordsTable } from "../database/schema.ts";
 import type { MemoryRepository, MemorySearchQuery } from "./memory-repository.ts";
+import { MEMORY_RECALL_LIMIT, type MemoryRecallQuery } from "./memory-repository.ts";
 
 export class KyselyMemoryRepository implements MemoryRepository {
   constructor(private readonly database: Kysely<ThreadMindDatabase>) {}
+
+  async recallActive(accountId: string, query: MemoryRecallQuery): Promise<MemoryRecord[]> {
+    return retryTransient(() => withAccount(this.database, accountId, async (trx) => {
+      const rows = await trx.selectFrom("threadmind.memory_records").selectAll()
+        .where("status", "=", "active")
+        .where(sql<boolean>`exists (
+          select 1 from jsonb_array_elements(source_evidence) as evidence
+          where source_refs ? (evidence->>'sourceId') and btrim(evidence->>'excerpt') <> ''
+        )`)
+        .where(sql<boolean>`(
+          subject_refs ?| ${sql.val(query.subjectRefs)}::text[]
+          or exists (
+            select 1 from jsonb_array_elements_text(source_refs) as source(value)
+            where source.value = ${query.submissionId}
+              or left(source.value, ${query.submissionId.length + 1}) = ${`${query.submissionId}:`}
+          )
+        )`)
+        .orderBy("updated_at", "desc").orderBy("id", "desc")
+        .limit(MEMORY_RECALL_LIMIT).execute();
+      return rows.map(toMemoryRecord);
+    }));
+  }
 
   async listActive(accountId: string, query: MemorySearchQuery = {}): Promise<MemoryRecord[]> {
     return retryTransient(() => withAccount(this.database, accountId, async (trx) => {

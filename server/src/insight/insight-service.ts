@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { InsightRepository } from "../adapters/insight-repository.ts";
 import type { MemoryRepository } from "../adapters/memory-repository.ts";
+import type { SubmissionRepository } from "../adapters/submission-repository.ts";
+import { invariant } from "../domain/errors.ts";
 import { createInsightBundle } from "../domain/insight.ts";
 import { createMemory } from "../domain/memory.ts";
 import type { ActionCard, ActionReceipt, InsightBundle } from "../domain/model.ts";
@@ -11,18 +13,27 @@ export class InsightService {
     private readonly repository: InsightRepository,
     private readonly memories: MemoryRepository,
     private readonly generator: InsightGenerator,
+    private readonly submissions?: SubmissionRepository,
   ) {}
 
   async ensureForReceipt(card: ActionCard, receipt: ActionReceipt): Promise<InsightBundle | undefined> {
     if (receipt.status !== "succeeded" || !receipt.targetRecordId) return undefined;
+    invariant(card.accountId === receipt.accountId && card.id === receipt.actionCardId && card.version === receipt.confirmedVersion,
+      "insight_receipt_mismatch", "Insight context must match the successful action");
     await this.memories.create(actionFactMemory(card, { ...receipt, status: "succeeded", targetRecordId: receipt.targetRecordId }));
     const generationKey = `receipt:${receipt.id}`;
     const existing = await this.repository.findByGenerationKey(receipt.accountId, generationKey);
     if (existing) return existing;
+    const extraction = await this.submissions?.findExtraction(receipt.accountId, card.submissionId);
+    const subjects = [...new Set([
+      ...actionSubjects(card),
+      ...(extraction?.participants.flatMap((participant) => participant.displayName?.trim() ? [participant.displayName.trim()] : []) ?? []),
+    ])];
     const generated = await this.generator.generate({
       card,
       receipt: { ...receipt, status: "succeeded", targetRecordId: receipt.targetRecordId },
-      memories: await this.memories.listActive(receipt.accountId),
+      memories: await this.memories.recallActive(receipt.accountId, { submissionId: card.submissionId, subjectRefs: subjects }),
+      ...(extraction ? { extraction } : {}),
     });
     const bundle = createInsightBundle({
       accountId: receipt.accountId,
@@ -68,7 +79,9 @@ function actionAssertion(card: ActionCard, targetRecordId: string): string {
 function actionSubjects(card: ActionCard): string[] {
   const values = [stringField(card, "displayName"), stringField(card, "contactMethod"), stringField(card, "targetContactId")]
     .filter((value): value is string => value !== undefined);
-  return [...new Set(values)];
+  const attendees = card.fields.attendees;
+  const people = typeof attendees === "string" ? attendees.split(",") : Array.isArray(attendees) ? attendees : [];
+  return [...new Set([...values, ...people.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)])];
 }
 
 function stringField(card: ActionCard, key: string): string | undefined {
