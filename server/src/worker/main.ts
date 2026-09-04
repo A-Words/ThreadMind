@@ -4,6 +4,7 @@ import { createTemporaryImageStorage } from "../adapters/supabase-temporary-imag
 import { createDatabase } from "../database/database.ts";
 import { createVisionExtractionModel } from "../extraction/openai-responses-vision-model.ts";
 import { readWorkerConfig, workerDatabaseEnv } from "./config.ts";
+import { safeWorkerErrorCode } from "./error-code.ts";
 import { SubmissionWorker } from "./submission-worker.ts";
 import { runWorkerLoop } from "./worker-loop.ts";
 
@@ -27,7 +28,7 @@ try {
   await runWorkerLoop(worker, {
     pollMs: config.pollMs,
     errorBackoffMs: config.errorBackoffMs,
-    onError: (error) => console.error("threadmind_worker_loop_error", { code: safeErrorCode(error) }),
+    onError: (error) => console.error("threadmind_worker_loop_error", { code: safeWorkerErrorCode(error) }),
   }, shutdown.signal);
 } finally {
   process.removeListener("SIGINT", stop);
@@ -40,15 +41,4 @@ function requireWorkerEnvironment(env: NodeJS.ProcessEnv): void {
   for (const name of ["THREADMIND_WORKER_DATABASE_URL", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "OPENAI_API_KEY", "THREADMIND_VISION_MODEL"]) {
     if (!env[name]?.trim()) throw new Error(`${name} is required`);
   }
-}
-
-function safeErrorCode(error: unknown): string {
-  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
-    return sanitize(error.code);
-  }
-  return "worker_loop_failed";
-}
-
-function sanitize(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9_:-]/g, "_").slice(0, 100) || "worker_loop_failed";
 }

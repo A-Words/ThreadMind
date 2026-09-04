@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readWorkerConfig, workerDatabaseEnv } from "../src/worker/config.js";
+import { safeWorkerErrorCode } from "../src/worker/error-code.js";
 import { runWorkerLoop } from "../src/worker/worker-loop.js";
 
 describe("Worker process loop", () => {
@@ -64,5 +65,11 @@ describe("Worker process loop", () => {
     assert.equal(env.DATABASE_URL, "postgresql://worker-role");
     assert.equal(env.DATABASE_POOL_MAX, "3");
     assert.throws(() => workerDatabaseEnv({ DATABASE_URL: "postgresql://api-role" }), /THREADMIND_WORKER_DATABASE_URL is required/);
+  });
+
+  it("reports safe connection timeout codes through nested transport errors", () => {
+    assert.equal(safeWorkerErrorCode(new Error("Connection terminated due to connection timeout")), "connection_timeout");
+    assert.equal(safeWorkerErrorCode(new TypeError("fetch failed", { cause: Object.assign(new Error("private"), { code: "ETIMEDOUT" }) })), "etimedout");
+    assert.equal(safeWorkerErrorCode(new Error("private database details")), "worker_loop_failed");
   });
 });
