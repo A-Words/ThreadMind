@@ -72,8 +72,29 @@ export class GroundedInsightGenerator implements InsightGenerator {
   }
 }
 
-const genderLanguage = /她|(?<!其)他(?!人)|先生|女士|夫人|丈夫|妻子|\b(?:she|he|her|hers|his|mr|mrs|ms)\b/iu;
-const relationshipLanguage = /同事|朋友|家人|亲属|伴侣|客户|供应商|\b(?:colleague|friend|family|relative|partner|customer|client|supplier|vendor)\b/iu;
+const identityLanguageRules: Array<{ evidence: RegExp; output: RegExp; replacement: string }> = [
+  { evidence: /她/u, output: /她/gu, replacement: "对方" },
+  { evidence: /(?<!其)他(?!人)/u, output: /(?<!其)他(?!人)/gu, replacement: "对方" },
+  { evidence: /先生/u, output: /先生/gu, replacement: "" },
+  { evidence: /女士/u, output: /女士/gu, replacement: "" },
+  { evidence: /夫人/u, output: /夫人/gu, replacement: "联系人" },
+  { evidence: /丈夫/u, output: /丈夫/gu, replacement: "联系人" },
+  { evidence: /妻子/u, output: /妻子/gu, replacement: "联系人" },
+  { evidence: /\bshe\b/iu, output: /\bshe\b/giu, replacement: "the person" },
+  { evidence: /\bhe\b/iu, output: /\bhe\b/giu, replacement: "the person" },
+  { evidence: /\bher\b/iu, output: /\bher\b/giu, replacement: "the person's" },
+  { evidence: /\bhers\b/iu, output: /\bhers\b/giu, replacement: "the person's" },
+  { evidence: /\bhis\b/iu, output: /\bhis\b/giu, replacement: "the person's" },
+  { evidence: /\bmr\.?\b/iu, output: /\bmr\.?\b/giu, replacement: "" },
+  { evidence: /\bmrs\.?\b/iu, output: /\bmrs\.?\b/giu, replacement: "" },
+  { evidence: /\bms\.?\b/iu, output: /\bms\.?\b/giu, replacement: "" },
+  ...["同事", "朋友", "家人", "亲属", "伴侣", "客户", "供应商"].map((word) => ({
+    evidence: new RegExp(word, "u"), output: new RegExp(word, "gu"), replacement: "联系人",
+  })),
+  ...["colleague", "friend", "family", "relative", "partner", "customer", "client", "supplier", "vendor"].map((word) => ({
+    evidence: new RegExp(`\\b${word}\\b`, "iu"), output: new RegExp(`\\b${word}\\b`, "giu"), replacement: "contact",
+  })),
+];
 
 function normalizeUnsupportedIdentityClaims(
   item: z.infer<typeof insightSynthesisSchema>["items"][number],
@@ -82,15 +103,7 @@ function normalizeUnsupportedIdentityClaims(
   const evidenceText = premises.flatMap((premise) => [premise.assertion, ...premise.evidence.map((evidence) => evidence.excerpt)]).join("\n");
   const normalize = (value: string) => {
     let safe = value;
-    if (!genderLanguage.test(evidenceText)) {
-      safe = safe.replace(/她/g, "对方").replace(/(?<!其)他(?!人)/g, "对方")
-        .replace(/先生|女士/g, "").replace(/夫人|丈夫|妻子/g, "联系人")
-        .replace(/\b(?:she|he|her|hers|his)\b/giu, "the person").replace(/\b(?:mr|mrs|ms)\.?\b/giu, "");
-    }
-    if (!relationshipLanguage.test(evidenceText)) {
-      safe = safe.replace(/同事|朋友|家人|亲属|伴侣|客户|供应商/g, "联系人")
-        .replace(/\b(?:colleague|friend|family|relative|partner|customer|client|supplier|vendor)\b/giu, "contact");
-    }
+    for (const rule of identityLanguageRules) if (!rule.evidence.test(evidenceText)) safe = safe.replace(rule.output, rule.replacement);
     return safe.replace(/ {2,}/g, " ").trim() || "联系人身份待核对";
   };
   const normalized = { title: normalize(item.title), explanation: normalize(item.explanation) };

@@ -91,6 +91,17 @@ it("neutralizes gender, honorific and relationship claims absent from cited evid
   assert.equal(result.items[0]!.suggestedAction, "给对方发送邮件");
 });
 
+it("does not let one supported honorific authorize unrelated pronouns or family relationships", async () => {
+  const input = fixture();
+  input.extraction!.evidenceSpans[0]!.excerpt = "陈先生请求发送方案";
+  const key = assembleInsightContext(input).premises.find((premise) => premise.kind === "current_context")!.key;
+  const generated = { ...item([key]), title: "回复陈先生", explanation: "联系他的妻子确认。", suggestedAction: "请他的妻子回复" };
+  const result = await new GroundedInsightGenerator({ model: "test", promptVersion: "v2", synthesize: async () => ({ items: [generated] }) }).generate(input);
+  assert.equal(result.items[0]!.title, "回复陈先生");
+  assert.equal(result.items[0]!.explanation, "联系对方的联系人确认。");
+  assert.equal(result.items[0]!.suggestedAction, "请对方的联系人回复");
+});
+
 function item(evidenceKeys: string[]) {
   return {
     kind: "next_step", title: "会前邮件发送方案", explanation: "对方偏好邮件，并约定会前看方案，可先发方案供其准备。",
